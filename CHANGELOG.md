@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.1.1] — 2026-03-11
+
+### Fixed
+
+- Release workflow now uses npm trusted publishing (OIDC) with Node 22.14.0 and creates a GitHub release with changelog notes and npm package link.
+
+---
+
 ## [0.1.0] — 2026-03-11
 
 ### Added
