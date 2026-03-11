@@ -29,7 +29,12 @@ describe("parseEnvInt", () => {
 
   test("returns fallback for float string", () => {
     process.env["TEST_INT"] = "1.5"
-    expect(parseEnvInt("TEST_INT", 42)).toBe(1)
+    expect(parseEnvInt("TEST_INT", 42)).toBe(42)
+  })
+
+  test("returns fallback for partial numeric string", () => {
+    process.env["TEST_INT"] = "5000ms"
+    expect(parseEnvInt("TEST_INT", 42)).toBe(42)
   })
 
   afterEach(() => { delete process.env["TEST_INT"] })

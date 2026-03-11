@@ -15,8 +15,9 @@ export type PluginConfig = {
 export function parseEnvInt(key: string, fallback: number): number {
   const raw = process.env[key]
   if (!raw) return fallback
-  const n = parseInt(raw, 10)
-  return Number.isFinite(n) && n > 0 ? n : fallback
+  if (!/^[1-9]\d*$/.test(raw)) return fallback
+  const n = Number(raw)
+  return Number.isSafeInteger(n) ? n : fallback
 }
 
 /**
