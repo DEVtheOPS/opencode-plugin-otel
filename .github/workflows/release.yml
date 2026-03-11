@@ -46,6 +46,11 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           NOTES=$(awk "/^## \[${VERSION}\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md)
+          NOTES="${NOTES}
+
+---
+
+📦 **npm:** https://www.npmjs.com/package/opencode-plugin-otel/v/${VERSION}"
           echo "notes<<EOF" >> "$GITHUB_OUTPUT"
           echo "$NOTES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
