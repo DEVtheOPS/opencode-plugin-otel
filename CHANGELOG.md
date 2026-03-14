@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.3.1](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.3.0...v0.3.1) (2026-03-14)
+
+
+### Bug Fixes
+
+* **ci:** remove NODE_AUTH_TOKEN to allow OIDC trusted publishing ([fa4cbc7](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/fa4cbc72d5e32ac471f3291b154f5b7c1c5aa097))
+
 ## [0.3.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.2.1...v0.3.0) (2026-03-14)
 
 

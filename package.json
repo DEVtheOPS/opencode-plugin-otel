@@ -1,6 +1,6 @@
 {
   "name": "@devtheops/opencode-plugin-otel",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "module": "src/index.ts",
   "main": "src/index.ts",
   "type": "module",
