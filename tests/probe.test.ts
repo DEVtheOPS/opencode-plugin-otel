@@ -1,5 +1,27 @@
 import { describe, test, expect } from "bun:test"
-import { probeEndpoint } from "../src/probe.ts"
+import { probeEndpoint, parseEndpoint } from "../src/probe.ts"
+
+describe("parseEndpoint", () => {
+  test("uses port 80 for http:// URLs without explicit port", () => {
+    expect(parseEndpoint("http://api.honeycomb.io")).toEqual({ host: "api.honeycomb.io", port: 80 })
+  })
+
+  test("uses port 443 for https:// URLs without explicit port", () => {
+    expect(parseEndpoint("https://api.honeycomb.io")).toEqual({ host: "api.honeycomb.io", port: 443 })
+  })
+
+  test("uses explicit port when provided", () => {
+    expect(parseEndpoint("http://localhost:4317")).toEqual({ host: "localhost", port: 4317 })
+  })
+
+  test("defaults to 4317 for unknown protocols without explicit port", () => {
+    expect(parseEndpoint("grpc://api.honeycomb.io")).toEqual({ host: "api.honeycomb.io", port: 4317 })
+  })
+
+  test("returns null for invalid URLs", () => {
+    expect(parseEndpoint("not a url")).toBeNull()
+  })
+})
 
 describe("probeEndpoint", () => {
   test("returns error for malformed URL (no scheme)", async () => {
