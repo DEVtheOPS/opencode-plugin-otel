@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.3.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.2.1...v0.3.0) (2026-03-14)
+
+
+### Features
+
+* **observability:** add debug logging and enhanced metrics ([a1b0a8c](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/a1b0a8cf5263080cf9623355e5161fb88f20e2f1))
+
+### Bug Fixes
+
+* **otel:** use UCUM-compliant unit strings for all metric instruments ([46681d8](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/46681d816dbe34049ef9abccc35cc5b023d5fbdd))
+
 ## [0.2.0] — 2026-03-11
 
 ### Changed
