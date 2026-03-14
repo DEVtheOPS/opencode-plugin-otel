@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [1.0.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.1.1...v1.0.0) (2026-03-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* package name changed from opencode-plugin-otel to @devtheops/opencode-plugin-otel
+
+### Features
+
+* rename package to @devtheops/opencode-plugin-otel ([f0af602](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/f0af602cb945cd677e0dbc552dc01c5d29e8d9fd))
+
+
+### Bug Fixes
+
+* **probe:** use protocol-aware default port for endpoint probing ([fa0e6ac](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/fa0e6ac6d48758f5729834f96257727250cbf2d2))
+* **probe:** use protocol-aware default port for endpoint probing ([73ae4d0](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/73ae4d05c13cc6b4d34140a87d555ad7efbf37e8))
+
 ## [0.2.0] — 2026-03-11
 
 ### Changed
