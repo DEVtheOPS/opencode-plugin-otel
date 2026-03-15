@@ -1,0 +1,5 @@
+default: true
+MD013: false        # line-length — too strict for tables and long URLs
+MD024:              # no-duplicate-heading
+  siblings_only: true  # allow duplicate headings in different sections (e.g. CHANGELOG)
+MD041: false        # first-line-heading — not all files need an H1 (e.g. CLAUDE.md)

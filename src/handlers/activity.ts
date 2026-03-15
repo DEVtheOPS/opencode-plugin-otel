@@ -1,27 +1,33 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import type { EventSessionDiff, EventCommandExecuted } from "@opencode-ai/sdk"
+import { isMetricEnabled } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
 
 /** Records lines-added and lines-removed metrics for each file in the diff. */
 export function handleSessionDiff(e: EventSessionDiff, ctx: HandlerContext) {
   const sessionID = e.properties.sessionID
+  const linesEnabled = isMetricEnabled("lines_of_code.count", ctx)
   let totalAdded = 0
   let totalRemoved = 0
   for (const fileDiff of e.properties.diff) {
     if (fileDiff.additions > 0) {
-      ctx.instruments.linesCounter.add(fileDiff.additions, {
-        ...ctx.commonAttrs,
-        "session.id": sessionID,
-        type: "added",
-      })
+      if (linesEnabled) {
+        ctx.instruments.linesCounter.add(fileDiff.additions, {
+          ...ctx.commonAttrs,
+          "session.id": sessionID,
+          type: "added",
+        })
+      }
       totalAdded += fileDiff.additions
     }
     if (fileDiff.deletions > 0) {
-      ctx.instruments.linesCounter.add(fileDiff.deletions, {
-        ...ctx.commonAttrs,
-        "session.id": sessionID,
-        type: "removed",
-      })
+      if (linesEnabled) {
+        ctx.instruments.linesCounter.add(fileDiff.deletions, {
+          ...ctx.commonAttrs,
+          "session.id": sessionID,
+          type: "removed",
+        })
+      }
       totalRemoved += fileDiff.deletions
     }
   }
@@ -41,11 +47,13 @@ export function handleCommandExecuted(e: EventCommandExecuted, ctx: HandlerConte
   ctx.log("debug", "otel: command.executed (bash)", { sessionID: e.properties.sessionID, argumentsLength: e.properties.arguments.length })
   if (!GIT_COMMIT_RE.test(e.properties.arguments)) return
 
-  ctx.instruments.commitCounter.add(1, {
-    ...ctx.commonAttrs,
-    "session.id": e.properties.sessionID,
-  })
-  ctx.log("debug", "otel: commit counter incremented", { sessionID: e.properties.sessionID })
+  if (isMetricEnabled("commit.count", ctx)) {
+    ctx.instruments.commitCounter.add(1, {
+      ...ctx.commonAttrs,
+      "session.id": e.properties.sessionID,
+    })
+    ctx.log("debug", "otel: commit counter incremented", { sessionID: e.properties.sessionID })
+  }
   ctx.logger.emit({
     severityNumber: SeverityNumber.INFO,
     severityText: "INFO",

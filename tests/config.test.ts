@@ -48,6 +48,7 @@ describe("loadConfig", () => {
     "OPENCODE_OTLP_LOGS_INTERVAL",
     "OPENCODE_OTLP_HEADERS",
     "OPENCODE_RESOURCE_ATTRIBUTES",
+    "OPENCODE_DISABLE_METRICS",
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_RESOURCE_ATTRIBUTES",
   ]
@@ -126,6 +127,35 @@ describe("loadConfig", () => {
     process.env["OPENCODE_RESOURCE_ATTRIBUTES"] = "new=attr"
     loadConfig()
     expect(process.env["OTEL_RESOURCE_ATTRIBUTES"]).toBe("new=attr")
+  })
+
+  test("disabledMetrics is empty set when OPENCODE_DISABLE_METRICS is unset", () => {
+    expect(loadConfig().disabledMetrics.size).toBe(0)
+  })
+
+  test("disabledMetrics parses a single metric name", () => {
+    process.env["OPENCODE_DISABLE_METRICS"] = "session.count"
+    expect(loadConfig().disabledMetrics).toEqual(new Set(["session.count"]))
+  })
+
+  test("disabledMetrics parses a comma-separated list", () => {
+    process.env["OPENCODE_DISABLE_METRICS"] = "session.count,cache.count,retry.count"
+    const { disabledMetrics } = loadConfig()
+    expect(disabledMetrics.has("session.count")).toBe(true)
+    expect(disabledMetrics.has("cache.count")).toBe(true)
+    expect(disabledMetrics.has("retry.count")).toBe(true)
+  })
+
+  test("disabledMetrics trims whitespace around names", () => {
+    process.env["OPENCODE_DISABLE_METRICS"] = " session.count , cache.count "
+    const { disabledMetrics } = loadConfig()
+    expect(disabledMetrics.has("session.count")).toBe(true)
+    expect(disabledMetrics.has("cache.count")).toBe(true)
+  })
+
+  test("disabledMetrics ignores empty segments from trailing commas", () => {
+    process.env["OPENCODE_DISABLE_METRICS"] = "session.count,"
+    expect(loadConfig().disabledMetrics.size).toBe(1)
   })
 })
 

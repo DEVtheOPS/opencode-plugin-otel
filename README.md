@@ -9,6 +9,7 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 - [Configuration](#configuration)
   - [Quick start](#quick-start)
   - [Headers and resource attributes](#headers-and-resource-attributes)
+  - [Disabling specific metrics](#disabling-specific-metrics)
   - [Datadog example](#datadog-example)
   - [Honeycomb example](#honeycomb-example)
   - [Claude Code dashboard compatibility](#claude-code-dashboard-compatibility)
@@ -18,21 +19,28 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 
 ### Metrics
 
-| Metric | Description |
-|--------|-------------|
-| `opencode.session.count` | Counter — incremented on each `session.created` event |
-| `opencode.token.usage` | Counter — per token type: `input`, `output`, `reasoning`, `cacheRead`, `cacheCreation` |
-| `opencode.cost.usage` | Counter — USD cost per completed assistant message |
-| `opencode.lines_of_code.count` | Counter — lines added/removed per `session.diff` event |
-| `opencode.commit.count` | Counter — git commits detected via bash tool |
-| `opencode.tool.duration` | Histogram — tool execution time in milliseconds |
+| Metric | Type | Description |
+|--------|------|-------------|
+| `opencode.session.count` | Counter | Incremented on each `session.created` event |
+| `opencode.token.usage` | Counter | Per token type: `input`, `output`, `reasoning`, `cacheRead`, `cacheCreation` |
+| `opencode.cost.usage` | Counter | USD cost per completed assistant message |
+| `opencode.lines_of_code.count` | Counter | Lines added/removed per `session.diff` event |
+| `opencode.commit.count` | Counter | Git commits detected via bash tool |
+| `opencode.tool.duration` | Histogram | Tool execution time in milliseconds |
+| `opencode.cache.count` | Counter | Cache activity per message: `type=cacheRead` or `type=cacheCreation` |
+| `opencode.session.duration` | Histogram | Session duration from created to idle in milliseconds |
+| `opencode.message.count` | Counter | Completed assistant messages per session |
+| `opencode.session.token.total` | Histogram | Total tokens consumed per session, recorded on idle |
+| `opencode.session.cost.total` | Histogram | Total cost per session in USD, recorded on idle |
+| `opencode.model.usage` | Counter | Messages per model and provider |
+| `opencode.retry.count` | Counter | API retries observed via `session.status` events |
 
 ### Log events
 
 | Event | Description |
 |-------|-------------|
 | `session.created` | Session started |
-| `session.idle` | Session went idle |
+| `session.idle` | Session went idle (includes total tokens, cost, messages) |
 | `session.error` | Session error |
 | `user_prompt` | User sent a message (includes `prompt_length`, `model`, `agent`) |
 | `api_request` | Completed assistant message (tokens, cost, duration) |
@@ -72,8 +80,17 @@ All configuration is via environment variables. Set them in your shell profile (
 | `OPENCODE_OTLP_METRICS_INTERVAL` | `60000` | Metrics export interval in milliseconds |
 | `OPENCODE_OTLP_LOGS_INTERVAL` | `5000` | Logs export interval in milliseconds |
 | `OPENCODE_METRIC_PREFIX` | `opencode.` | Prefix for all metric names (e.g. set to `claude_code.` for Claude Code dashboard compatibility) |
-| `OPENCODE_OTLP_HEADERS` | _(unset)_ | Comma-separated `key=value` headers added to all OTLP exports. Example: `api-key=abc123,x-tenant=my-org`. **Keep out of version control — may contain sensitive auth tokens.** |
+| `OPENCODE_DISABLE_METRICS` | _(unset)_ | Comma-separated list of metric name suffixes to disable (e.g. `cache.count,session.duration`) |
+| `OPENCODE_OTLP_HEADERS` | _(unset)_ | Comma-separated `key=value` headers added to all OTLP exports. **Keep out of version control — may contain sensitive auth tokens.** |
 | `OPENCODE_RESOURCE_ATTRIBUTES` | _(unset)_ | Comma-separated `key=value` pairs merged into the OTel resource. Example: `service.version=1.2.3,deployment.environment=production` |
+
+### Quick start
+
+```bash
+export OPENCODE_ENABLE_TELEMETRY=1
+export OPENCODE_OTLP_ENDPOINT=http://localhost:4317
+opencode
+```
 
 ### Headers and resource attributes
 
@@ -87,13 +104,37 @@ export OPENCODE_RESOURCE_ATTRIBUTES="service.version=1.2.3,deployment.environmen
 
 > **Security note:** `OPENCODE_OTLP_HEADERS` typically contains auth tokens. Set it in your shell profile (`~/.zshrc`, `~/.bashrc`) or a secrets manager — never commit it to version control or print it in CI logs.
 
-### Quick start
+### Disabling specific metrics
+
+Use `OPENCODE_DISABLE_METRICS` to suppress individual metrics. The value is a comma-separated list of metric name suffixes (without the prefix).
+
+Disabling a metric only stops the counter/histogram from being incremented — the corresponding log events are still emitted.
 
 ```bash
-export OPENCODE_ENABLE_TELEMETRY=1
-export OPENCODE_OTLP_ENDPOINT=http://localhost:4317
-opencode
+# Disable a single metric
+export OPENCODE_DISABLE_METRICS="retry.count"
+
+# Disable multiple metrics
+export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.total,session.cost.total,model.usage,retry.count,message.count"
 ```
+
+#### opencode-only metrics
+
+The following metrics are specific to opencode and have no equivalent in Claude Code's built-in monitoring. If you are using a Claude Code dashboard and want to avoid cluttering it with opencode-only metrics, you can disable them:
+
+```bash
+export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.total,session.cost.total,model.usage,retry.count,message.count"
+```
+
+| Metric suffix | Why it's opencode-only |
+|---------------|------------------------|
+| `cache.count` | Tracks cache read/write activity as occurrence counts — not a Claude Code signal |
+| `session.duration` | Session wall-clock duration — not emitted by Claude Code |
+| `session.token.total` | Per-session token histogram — not emitted by Claude Code |
+| `session.cost.total` | Per-session cost histogram — not emitted by Claude Code |
+| `model.usage` | Per-model message counter — not emitted by Claude Code |
+| `retry.count` | API retry counter — not emitted by Claude Code |
+| `message.count` | Completed message counter — not emitted by Claude Code |
 
 ### Datadog example
 

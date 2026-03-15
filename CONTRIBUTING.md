@@ -35,7 +35,7 @@ opencode loads TypeScript natively via Bun, so there is no build step required d
 
 ## Project structure
 
-```
+```text
 src/
 ├── index.ts              — Plugin entrypoint, wires everything together
 ├── types.ts              — Shared types (Level, HandlerContext, Instruments, etc.)
@@ -65,7 +65,7 @@ Then set `OPENCODE_ENABLE_TELEMETRY=1` and start opencode. The collector will pr
 
 This project follows [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). All commits must be structured as:
 
-```
+```text
 <type>[optional scope]: <description>
 
 [optional body]
@@ -91,7 +91,7 @@ This project follows [Conventional Commits](https://www.conventionalcommits.org/
 
 Append `!` after the type or add a `BREAKING CHANGE:` footer:
 
-```
+```text
 feat!: drop support for OTLP HTTP
 
 BREAKING CHANGE: only OTLP/gRPC is supported going forward
@@ -99,7 +99,7 @@ BREAKING CHANGE: only OTLP/gRPC is supported going forward
 
 ### Examples
 
-```
+```text
 feat(handlers): add support for file.edited event
 fix(probe): handle malformed endpoint URL without throwing
 docs: update Datadog configuration example

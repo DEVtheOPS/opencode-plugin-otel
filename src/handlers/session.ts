@@ -1,13 +1,15 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
-import { errorSummary, setBoundedMap } from "../util.ts"
+import { errorSummary, setBoundedMap, isMetricEnabled } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
 
 /** Increments the session counter, records start time, and emits a `session.created` log event. */
 export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext) {
   const sessionID = e.properties.info.id
   const createdAt = e.properties.info.time.created
-  ctx.instruments.sessionCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID })
+  if (isMetricEnabled("session.count", ctx)) {
+    ctx.instruments.sessionCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID })
+  }
   setBoundedMap(ctx.sessionTotals, sessionID, { startMs: createdAt, tokens: 0, cost: 0, messages: 0 })
   ctx.logger.emit({
     severityNumber: SeverityNumber.INFO,
@@ -41,9 +43,15 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
 
   if (totals) {
     duration_ms = Date.now() - totals.startMs
-    ctx.instruments.sessionDurationHistogram.record(duration_ms, attrs)
-    ctx.instruments.sessionTokenGauge.record(totals.tokens, attrs)
-    ctx.instruments.sessionCostGauge.record(totals.cost, attrs)
+    if (isMetricEnabled("session.duration", ctx)) {
+      ctx.instruments.sessionDurationHistogram.record(duration_ms, attrs)
+    }
+    if (isMetricEnabled("session.token.total", ctx)) {
+      ctx.instruments.sessionTokenGauge.record(totals.tokens, attrs)
+    }
+    if (isMetricEnabled("session.cost.total", ctx)) {
+      ctx.instruments.sessionCostGauge.record(totals.cost, attrs)
+    }
   }
 
   ctx.logger.emit({
@@ -95,6 +103,8 @@ export function handleSessionStatus(e: EventSessionStatus, ctx: HandlerContext) 
   if (e.properties.status.type !== "retry") return
   const { sessionID, status } = e.properties
   const { attempt, message: retryMessage } = status
-  ctx.instruments.retryCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID })
-  ctx.log("debug", "otel: retry counter incremented", { sessionID, attempt, retryMessage })
+  if (isMetricEnabled("retry.count", ctx)) {
+    ctx.instruments.retryCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID })
+    ctx.log("debug", "otel: retry counter incremented", { sessionID, attempt, retryMessage })
+  }
 }

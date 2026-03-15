@@ -70,7 +70,7 @@ export type MockContext = {
   pluginLog: SpyPluginLog
 }
 
-export function makeCtx(projectID = "proj_test"): MockContext {
+export function makeCtx(projectID = "proj_test", disabledMetrics: string[] = []): MockContext {
   const session = makeCounter()
   const token = makeCounter()
   const cost = makeCounter()
@@ -112,6 +112,7 @@ export function makeCtx(projectID = "proj_test"): MockContext {
     pendingToolSpans: new Map(),
     pendingPermissions: new Map(),
     sessionTotals: new Map(),
+    disabledMetrics: new Set(disabledMetrics),
   }
 
   return {

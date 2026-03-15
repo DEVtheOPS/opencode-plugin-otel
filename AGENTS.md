@@ -20,7 +20,7 @@ bun test
 
 ## Project layout
 
-```
+```text
 src/
 ├── index.ts              — Plugin entrypoint
 ├── types.ts              — Shared types
@@ -52,7 +52,7 @@ src/
 
 All commits must follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
 
-```
+```text
 <type>[optional scope]: <description>
 ```
 
@@ -62,7 +62,7 @@ Use `!` or a `BREAKING CHANGE:` footer for breaking changes.
 
 Examples:
 
-```
+```text
 feat(handlers): add support for file.edited event
 fix(probe): handle malformed endpoint URL without throwing
 chore(deps): bump @opentelemetry/api to 1.10.0

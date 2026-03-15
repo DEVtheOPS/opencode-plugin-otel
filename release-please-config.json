@@ -2,18 +2,45 @@
   "bootstrap-sha": "b7bf72d1b8ee652acb714431087d24b475ca6460",
   "packages": {
     ".": {
-      "release-type": "node",
-      "package-name": "@devtheops/opencode-plugin-otel",
       "changelog-sections": [
-        { "type": "feat", "section": "Features" },
-        { "type": "fix", "section": "Bug Fixes" },
-        { "type": "perf", "section": "Performance Improvements" },
-        { "type": "refactor", "section": "Code Refactoring" },
-        { "type": "docs", "section": "Documentation" },
-        { "type": "ci", "section": "Continuous Integration", "hidden": true },
-        { "type": "build", "section": "Build System", "hidden": true },
-        { "type": "chore", "section": "Miscellaneous Chores", "hidden": true }
-      ]
+        {
+          "section": "Features",
+          "type": "feat"
+        },
+        {
+          "section": "Bug Fixes",
+          "type": "fix"
+        },
+        {
+          "section": "Performance Improvements",
+          "type": "perf"
+        },
+        {
+          "section": "Code Refactoring",
+          "type": "refactor"
+        },
+        {
+          "section": "Documentation",
+          "type": "docs"
+        },
+        {
+          "hidden": true,
+          "section": "Continuous Integration",
+          "type": "ci"
+        },
+        {
+          "hidden": true,
+          "section": "Build System",
+          "type": "build"
+        },
+        {
+          "hidden": true,
+          "section": "Miscellaneous Chores",
+          "type": "chore"
+        }
+      ],
+      "package-name": "@devtheops/opencode-plugin-otel",
+      "release-type": "node"
     }
   }
 }

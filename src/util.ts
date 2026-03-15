@@ -23,6 +23,14 @@ export function setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V) {
 }
 
 /**
+ * Returns `true` if the metric name (without prefix) is not in the disabled set.
+ * The `name` should be the suffix after the metric prefix, e.g. `"session.count"`.
+ */
+export function isMetricEnabled(name: string, ctx: { disabledMetrics: Set<string> }): boolean {
+  return !ctx.disabledMetrics.has(name)
+}
+
+/**
  * Accumulates token and cost totals for a session, and increments the message count.
  * Uses `setBoundedMap` to produce a new object rather than mutating in-place.
  * No-ops silently if the session was not previously registered via `handleSessionCreated`.

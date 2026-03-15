@@ -1,6 +1,6 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import type { AssistantMessage, EventMessageUpdated, EventMessagePartUpdated, ToolPart } from "@opencode-ai/sdk"
-import { errorSummary, setBoundedMap, accumulateSessionTotals } from "../util.ts"
+import { errorSummary, setBoundedMap, accumulateSessionTotals, isMetricEnabled } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
 
 /**
@@ -15,26 +15,39 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
 
   const { sessionID, modelID, providerID } = assistant
   const duration = assistant.time.completed - assistant.time.created
-  const { tokenCounter, costCounter } = ctx.instruments
 
   const totalTokens = assistant.tokens.input + assistant.tokens.output + assistant.tokens.reasoning
     + assistant.tokens.cache.read + assistant.tokens.cache.write
-  tokenCounter.add(assistant.tokens.input, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "input" })
-  tokenCounter.add(assistant.tokens.output, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "output" })
-  tokenCounter.add(assistant.tokens.reasoning, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "reasoning" })
-  tokenCounter.add(assistant.tokens.cache.read, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "cacheRead" })
-  tokenCounter.add(assistant.tokens.cache.write, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "cacheCreation" })
-  costCounter.add(assistant.cost, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID })
 
-  if (assistant.tokens.cache.read > 0) {
-    ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "cacheRead" })
-  }
-  if (assistant.tokens.cache.write > 0) {
-    ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "cacheCreation" })
+  if (isMetricEnabled("token.usage", ctx)) {
+    const { tokenCounter } = ctx.instruments
+    tokenCounter.add(assistant.tokens.input, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "input" })
+    tokenCounter.add(assistant.tokens.output, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "output" })
+    tokenCounter.add(assistant.tokens.reasoning, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "reasoning" })
+    tokenCounter.add(assistant.tokens.cache.read, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "cacheRead" })
+    tokenCounter.add(assistant.tokens.cache.write, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "cacheCreation" })
   }
 
-  ctx.instruments.messageCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID })
-  ctx.instruments.modelUsageCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, provider: providerID })
+  if (isMetricEnabled("cost.usage", ctx)) {
+    ctx.instruments.costCounter.add(assistant.cost, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID })
+  }
+
+  if (isMetricEnabled("cache.count", ctx)) {
+    if (assistant.tokens.cache.read > 0) {
+      ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "cacheRead" })
+    }
+    if (assistant.tokens.cache.write > 0) {
+      ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, type: "cacheCreation" })
+    }
+  }
+
+  if (isMetricEnabled("message.count", ctx)) {
+    ctx.instruments.messageCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID })
+  }
+
+  if (isMetricEnabled("model.usage", ctx)) {
+    ctx.instruments.modelUsageCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, provider: providerID })
+  }
 
   accumulateSessionTotals(sessionID, totalTokens, assistant.cost, ctx)
 
@@ -136,12 +149,14 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
   const duration_ms = end - start
   const success = toolPart.state.status === "completed"
 
-  ctx.instruments.toolDurationHistogram.record(duration_ms, {
-    ...ctx.commonAttrs,
-    "session.id": toolPart.sessionID,
-    tool_name: toolPart.tool,
-    success,
-  })
+  if (isMetricEnabled("tool.duration", ctx)) {
+    ctx.instruments.toolDurationHistogram.record(duration_ms, {
+      ...ctx.commonAttrs,
+      "session.id": toolPart.sessionID,
+      tool_name: toolPart.tool,
+      success,
+    })
+  }
 
   const sizeAttr = success
     ? { tool_result_size_bytes: Buffer.byteLength((toolPart.state as { output: string }).output, "utf8") }

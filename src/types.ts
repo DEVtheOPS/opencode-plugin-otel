@@ -68,4 +68,5 @@ export type HandlerContext = {
   pendingToolSpans: Map<string, PendingToolSpan>
   pendingPermissions: Map<string, PendingPermission>
   sessionTotals: Map<string, SessionTotals>
+  disabledMetrics: Set<string>
 }

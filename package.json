@@ -1,22 +1,4 @@
 {
-  "name": "@devtheops/opencode-plugin-otel",
-  "version": "0.3.0",
-  "module": "src/index.ts",
-  "main": "src/index.ts",
-  "type": "module",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/DEVtheOPS/opencode-plugin-otel.git"
-  },
-  "files": [
-    "src/"
-  ],
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
   "dependencies": {
     "@opencode-ai/plugin": "^1.2.23",
     "@opencode-ai/sdk": "^1.2.23",
@@ -28,5 +10,23 @@
     "@opentelemetry/sdk-metrics": "^2.6.0",
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "typescript": "^5.9.3"
-  }
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "files": [
+    "src/"
+  ],
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "name": "@devtheops/opencode-plugin-otel",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DEVtheOPS/opencode-plugin-otel.git"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "version": "0.3.0"
 }
