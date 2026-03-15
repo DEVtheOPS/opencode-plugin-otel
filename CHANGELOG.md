@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.4.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.3.0...v0.4.0) (2026-03-15)
+
+
+### Features
+
+* **config:** add OPENCODE_DISABLE_METRICS to suppress individual metrics ([8ec7c48](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/8ec7c486d102921829a26d1f377df6aa20d988ad))
+* **config:** add OPENCODE_DISABLE_METRICS to suppress individual metrics ([2df1376](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/2df13762a406040cca464caa5b6b7866bbcc516d))
+
+
+### Bug Fixes
+
+* **ci:** remove NODE_AUTH_TOKEN to allow OIDC trusted publishing ([fa4cbc7](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/fa4cbc72d5e32ac471f3291b154f5b7c1c5aa097))
+* **config:** address code review findings on disable-metrics feature ([1929327](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/1929327d29eb130280625b41d2a3d36be1cdc52f))
+
 ## [0.3.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.2.1...v0.3.0) (2026-03-14)
 
 ### Features
