@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.4.1](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.4.0...v0.4.1) (2026-03-16)
+
+
+### Bug Fixes
+
+* Normalize token and cost units for Claude compatibility ([a8b35dc](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/a8b35dc65e84c646b40abccc534afb6110ba2f26))
+* **otel:** normalize session token and cost units ([12bfafe](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/12bfafe6b5c31c9a8ec8db09b1cd3c83a8b39ad4))
+* **otel:** normalize token and cost units for claude compatibility ([aa3deca](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/aa3deca8cd3323a5d1f9fc749b43d0992f1ba50a))
+
 ## [0.4.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.3.0...v0.4.0) (2026-03-15)
 
 
