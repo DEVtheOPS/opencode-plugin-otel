@@ -1,4 +1,40 @@
 {
+  "name": "@devtheops/opencode-plugin-otel",
+  "version": "0.4.1",
+  "description": "OpenTelemetry telemetry plugin for opencode CLI",
+  "keywords": [
+    "opentelemetry",
+    "otel",
+    "telemetry",
+    "opencode",
+    "plugin",
+    "observability"
+  ],
+  "license": "MPL-2.0",
+  "author": "DEVtheOPS",
+  "homepage": "https://github.com/DEVtheOPS/opencode-plugin-otel#readme",
+  "bugs": {
+    "url": "https://github.com/DEVtheOPS/opencode-plugin-otel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DEVtheOPS/opencode-plugin-otel.git"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@opencode-ai/plugin": "^1.2.23",
     "@opencode-ai/sdk": "^1.2.23",
@@ -13,20 +49,5 @@
   },
   "devDependencies": {
     "@types/bun": "latest"
-  },
-  "files": [
-    "src/"
-  ],
-  "main": "src/index.ts",
-  "module": "src/index.ts",
-  "name": "@devtheops/opencode-plugin-otel",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/DEVtheOPS/opencode-plugin-otel.git"
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "type": "module",
-  "version": "0.4.1"
+  }
 }

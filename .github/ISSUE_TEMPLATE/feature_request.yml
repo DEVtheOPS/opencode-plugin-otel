@@ -1,0 +1,55 @@
+name: Feature request
+description: Suggest a new feature or enhancement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Is your feature request related to a problem?
+      description: A clear description of what problem you're trying to solve
+      placeholder: "I'm always frustrated when..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the solution you'd like
+      description: What would you like to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Describe alternatives you've considered
+      description: Have you considered any alternative solutions or workarounds?
+
+  - type: dropdown
+    id: telemetry-type
+    attributes:
+      label: Telemetry type
+      description: Which type(s) of telemetry would this affect?
+      multiple: true
+      options:
+        - Metrics
+        - Logs/Events
+        - Configuration
+        - Other
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Any other context, screenshots, or examples
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues and discussions for similar feature requests
+          required: true
+        - label: I have checked the changelog to see if this already exists
+          required: true
