@@ -12,7 +12,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 ### Features
 
 * **handlers:** add agent usage metrics and sub-agent tracking ([2d12f88](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/2d12f8846425075c4d8aac1573ac6e488bf868c3))
-* **handlers:** add agent usage metrics and sub-agent tracking ([5dedc4e](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/5dedc4eb81fa6f36ff8cc883952247a0023d0ceb))
 
 ## [0.4.1](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.4.0...v0.4.1) (2026-03-16)
 
@@ -29,8 +28,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 ### Features
 
 * **config:** add OPENCODE_DISABLE_METRICS to suppress individual metrics ([8ec7c48](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/8ec7c486d102921829a26d1f377df6aa20d988ad))
-* **config:** add OPENCODE_DISABLE_METRICS to suppress individual metrics ([2df1376](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/2df13762a406040cca464caa5b6b7866bbcc516d))
-
 
 ### Bug Fixes
 
