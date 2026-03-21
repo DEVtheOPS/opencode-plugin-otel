@@ -3,7 +3,7 @@ import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSess
 import { makeCtx } from "../helpers.ts"
 import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
 
-function makeSessionCreated(sessionID: string, createdAt = 1000): EventSessionCreated {
+function makeSessionCreated(sessionID: string, createdAt = 1000, parentID?: string): EventSessionCreated {
   return {
     type: "session.created",
     properties: {
@@ -11,6 +11,7 @@ function makeSessionCreated(sessionID: string, createdAt = 1000): EventSessionCr
         id: sessionID,
         projectID: "proj_test",
         directory: "/tmp",
+        parentID,
         time: { created: createdAt },
       },
     },
@@ -119,7 +120,7 @@ describe("handleSessionIdle", () => {
   test("records session token and cost histograms when totals exist", async () => {
     const { ctx, gauges } = makeCtx()
     await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 500, tokens: 150, cost: 0.03, messages: 2 })
+    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 500, tokens: 150, cost: 0.03, messages: 2, agent: "build" })
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     expect(gauges.sessionToken.calls).toHaveLength(1)
     expect(gauges.sessionToken.calls.at(0)!.value).toBe(150)
@@ -130,7 +131,7 @@ describe("handleSessionIdle", () => {
   test("emits total_tokens and total_messages in log record attributes", async () => {
     const { ctx, logger } = makeCtx()
     await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 100, tokens: 200, cost: 0.05, messages: 3 })
+    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 100, tokens: 200, cost: 0.05, messages: 3, agent: "general" })
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     const record = logger.records.find(r => r.body === "session.idle")!
     expect(record.attributes?.["total_tokens"]).toBe(200)
@@ -193,6 +194,38 @@ describe("handleSessionError", () => {
     await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     handleSessionError({ type: "session.error", properties: {} } as unknown as EventSessionError, ctx)
     expect(ctx.sessionTotals.has("ses_1")).toBe(true)
+  })
+})
+
+describe("handleSessionCreated — is_subagent", () => {
+  test("tags session counter with is_subagent=false when no parentID", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    expect(counters.session.calls.at(0)!.attrs["is_subagent"]).toBe(false)
+  })
+
+  test("tags session counter with is_subagent=true when parentID is present", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_child", 1000, "ses_parent"), ctx)
+    expect(counters.session.calls.at(0)!.attrs["is_subagent"]).toBe(true)
+  })
+
+  test("includes is_subagent=false on session.created log record", async () => {
+    const { ctx, logger } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    expect(logger.records.at(0)!.attributes?.["is_subagent"]).toBe(false)
+  })
+
+  test("includes is_subagent=true on session.created log record for child session", async () => {
+    const { ctx, logger } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_child", 1000, "ses_parent"), ctx)
+    expect(logger.records.at(0)!.attributes?.["is_subagent"]).toBe(true)
+  })
+
+  test("seeds sessionTotals agent as 'unknown' on creation", async () => {
+    const { ctx } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    expect(ctx.sessionTotals.get("ses_1")!.agent).toBe("unknown")
   })
 })
 

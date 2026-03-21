@@ -5,21 +5,22 @@ import type { HandlerContext } from "../types.ts"
 
 /** Increments the session counter, records start time, and emits a `session.created` log event. */
 export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext) {
-  const sessionID = e.properties.info.id
-  const createdAt = e.properties.info.time.created
+  const { id: sessionID, time, parentID } = e.properties.info
+  const createdAt = time.created
+  const isSubagent = !!parentID
   if (isMetricEnabled("session.count", ctx)) {
-    ctx.instruments.sessionCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID })
+    ctx.instruments.sessionCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, is_subagent: isSubagent })
   }
-  setBoundedMap(ctx.sessionTotals, sessionID, { startMs: createdAt, tokens: 0, cost: 0, messages: 0 })
+  setBoundedMap(ctx.sessionTotals, sessionID, { startMs: createdAt, tokens: 0, cost: 0, messages: 0, agent: "unknown" })
   ctx.logger.emit({
     severityNumber: SeverityNumber.INFO,
     severityText: "INFO",
     timestamp: createdAt,
     observedTimestamp: Date.now(),
     body: "session.created",
-    attributes: { "event.name": "session.created", "session.id": sessionID, ...ctx.commonAttrs },
+    attributes: { "event.name": "session.created", "session.id": sessionID, is_subagent: isSubagent, ...ctx.commonAttrs },
   })
-  return ctx.log("info", "otel: session.created", { sessionID, createdAt })
+  return ctx.log("info", "otel: session.created", { sessionID, createdAt, isSubagent })
 }
 
 function sweepSession(sessionID: string, ctx: HandlerContext) {

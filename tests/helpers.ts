@@ -57,6 +57,7 @@ export type MockContext = {
     message: SpyCounter
     modelUsage: SpyCounter
     retry: SpyCounter
+    subtask: SpyCounter
   }
   histograms: {
     tool: SpyHistogram
@@ -80,6 +81,7 @@ export function makeCtx(projectID = "proj_test", disabledMetrics: string[] = [])
   const message = makeCounter()
   const modelUsage = makeCounter()
   const retry = makeCounter()
+  const subtask = makeCounter()
   const toolHistogram = makeHistogram()
   const sessionDurationHistogram = makeHistogram()
   const sessionTokenGauge = makeHistogram()
@@ -99,9 +101,9 @@ export function makeCtx(projectID = "proj_test", disabledMetrics: string[] = [])
     messageCounter: message as unknown as Counter,
     sessionTokenGauge: sessionTokenGauge as unknown as Histogram,
     sessionCostGauge: sessionCostGauge as unknown as Histogram,
-
     modelUsageCounter: modelUsage as unknown as Counter,
     retryCounter: retry as unknown as Counter,
+    subtaskCounter: subtask as unknown as Counter,
   }
 
   const ctx: HandlerContext = {
@@ -117,7 +119,7 @@ export function makeCtx(projectID = "proj_test", disabledMetrics: string[] = [])
 
   return {
     ctx,
-    counters: { session, token, cost, lines, commit, cache, message, modelUsage, retry },
+    counters: { session, token, cost, lines, commit, cache, message, modelUsage, retry, subtask },
     histograms: { tool: toolHistogram, sessionDuration: sessionDurationHistogram },
     gauges: { sessionToken: sessionTokenGauge, sessionCost: sessionCostGauge },
     logger,

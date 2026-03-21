@@ -135,6 +135,9 @@ export const OtelPlugin: Plugin = async ({ project, client }) => {
     },
 
     "chat.message": safe("chat.message", async (input, output) => {
+      const agent = input.agent ?? "unknown"
+      const totals = sessionTotals.get(input.sessionID)
+      if (totals) totals.agent = agent
       const promptLength = output.parts.reduce(
         (acc, p) => (p.type === "text" ? acc + p.text.length : acc),
         0,
@@ -148,7 +151,7 @@ export const OtelPlugin: Plugin = async ({ project, client }) => {
         attributes: {
           "event.name": "user_prompt",
           "session.id": input.sessionID,
-          agent: input.agent ?? "unknown",
+          agent,
           prompt_length: promptLength,
           model: input.model
             ? `${input.model.providerID}/${input.model.modelID}`

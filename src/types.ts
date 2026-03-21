@@ -49,6 +49,7 @@ export type Instruments = {
   sessionCostGauge: Histogram
   modelUsageCounter: Counter
   retryCounter: Counter
+  subtaskCounter: Counter
 }
 
 /** Accumulated per-session totals used for gauge snapshots on session.idle. */
@@ -57,6 +58,7 @@ export type SessionTotals = {
   tokens: number
   cost: number
   messages: number
+  agent: string
 }
 
 /** Shared context threaded through every event handler. */

@@ -3,6 +3,27 @@ import { handleMessageUpdated, handleMessagePartUpdated } from "../../src/handle
 import { makeCtx } from "../helpers.ts"
 import type { EventMessageUpdated, EventMessagePartUpdated } from "@opencode-ai/sdk"
 
+function makeSubtaskPartUpdated(overrides: {
+  sessionID?: string
+  agent?: string
+  description?: string
+  prompt?: string
+} = {}): EventMessagePartUpdated {
+  return {
+    type: "message.part.updated",
+    properties: {
+      part: {
+        type: "subtask",
+        sessionID: overrides.sessionID ?? "ses_1",
+        messageID: "msg_1",
+        agent: overrides.agent ?? "build",
+        description: overrides.description ?? "Build the project",
+        prompt: overrides.prompt ?? "Run the build and fix errors",
+      },
+    },
+  } as unknown as EventMessagePartUpdated
+}
+
 function makeAssistantMessageUpdated(overrides: {
   sessionID?: string
   modelID?: string
@@ -173,7 +194,7 @@ describe("handleMessageUpdated", () => {
 
   test("accumulates session totals including cache tokens", async () => {
     const { ctx } = makeCtx()
-    ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0 })
+    ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "build" })
     await handleMessageUpdated(
       makeAssistantMessageUpdated({
         sessionID: "ses_1",
@@ -295,6 +316,126 @@ describe("handleMessagePartUpdated", () => {
       },
     } as unknown as EventMessagePartUpdated
     await handleMessagePartUpdated(e, ctx)
+    expect(histograms.tool.calls).toHaveLength(0)
+  })
+})
+
+describe("handleMessageUpdated — agent attribute", () => {
+  test("includes agent attr on token counters from session totals", async () => {
+    const { ctx, counters } = makeCtx()
+    ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "plan" })
+    await handleMessageUpdated(makeAssistantMessageUpdated({ sessionID: "ses_1" }), ctx)
+    const inputCall = counters.token.calls.find((c) => c.attrs["type"] === "input")!
+    expect(inputCall.attrs["agent"]).toBe("plan")
+  })
+
+  test("includes agent attr on cost counter", async () => {
+    const { ctx, counters } = makeCtx()
+    ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "build" })
+    await handleMessageUpdated(makeAssistantMessageUpdated({ sessionID: "ses_1" }), ctx)
+    expect(counters.cost.calls.at(0)!.attrs["agent"]).toBe("build")
+  })
+
+  test("includes agent attr on message counter", async () => {
+    const { ctx, counters } = makeCtx()
+    ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "general" })
+    await handleMessageUpdated(makeAssistantMessageUpdated({ sessionID: "ses_1" }), ctx)
+    expect(counters.message.calls.at(0)!.attrs["agent"]).toBe("general")
+  })
+
+  test("includes agent attr on model usage counter", async () => {
+    const { ctx, counters } = makeCtx()
+    ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "review" })
+    await handleMessageUpdated(makeAssistantMessageUpdated({ sessionID: "ses_1" }), ctx)
+    expect(counters.modelUsage.calls.at(0)!.attrs["agent"]).toBe("review")
+  })
+
+  test("includes agent attr on cache counters", async () => {
+    const { ctx, counters } = makeCtx()
+    ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "tdd" })
+    await handleMessageUpdated(
+      makeAssistantMessageUpdated({ sessionID: "ses_1", tokens: { input: 100, output: 50, reasoning: 0, cache: { read: 10, write: 5 } } }),
+      ctx,
+    )
+    expect(counters.cache.calls.at(0)!.attrs["agent"]).toBe("tdd")
+  })
+
+  test("defaults agent to 'unknown' when session totals are absent", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleMessageUpdated(makeAssistantMessageUpdated({ sessionID: "ses_no_totals" }), ctx)
+    const inputCall = counters.token.calls.find((c) => c.attrs["type"] === "input")!
+    expect(inputCall.attrs["agent"]).toBe("unknown")
+  })
+
+  test("includes agent on api_request log record", async () => {
+    const { ctx, logger } = makeCtx()
+    ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "plan" })
+    await handleMessageUpdated(makeAssistantMessageUpdated({ sessionID: "ses_1" }), ctx)
+    expect(logger.records.at(0)!.attributes?.["agent"]).toBe("plan")
+  })
+
+  test("includes agent on api_error log record", async () => {
+    const { ctx, logger } = makeCtx()
+    ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "build" })
+    await handleMessageUpdated(
+      makeAssistantMessageUpdated({ sessionID: "ses_1", error: { name: "APIError" } }),
+      ctx,
+    )
+    expect(logger.records.at(0)!.attributes?.["agent"]).toBe("build")
+  })
+})
+
+describe("handleMessagePartUpdated — subtask parts", () => {
+  test("increments subtask counter with agent and session.id attrs", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleMessagePartUpdated(makeSubtaskPartUpdated({ sessionID: "ses_1", agent: "build" }), ctx)
+    expect(counters.subtask.calls).toHaveLength(1)
+    const call = counters.subtask.calls.at(0)!
+    expect(call.value).toBe(1)
+    expect(call.attrs["agent"]).toBe("build")
+    expect(call.attrs["session.id"]).toBe("ses_1")
+  })
+
+  test("emits subtask_invoked log record", async () => {
+    const { ctx, logger } = makeCtx()
+    await handleMessagePartUpdated(
+      makeSubtaskPartUpdated({ agent: "plan", description: "Plan the feature", prompt: "Create a plan" }),
+      ctx,
+    )
+    expect(logger.records).toHaveLength(1)
+    const record = logger.records.at(0)!
+    expect(record.body).toBe("subtask_invoked")
+    expect(record.attributes?.["agent"]).toBe("plan")
+    expect(record.attributes?.["description"]).toBe("Plan the feature")
+    expect(record.attributes?.["prompt_length"]).toBe("Create a plan".length)
+  })
+
+  test("includes project.id in subtask counter attrs", async () => {
+    const { ctx, counters } = makeCtx("proj_xyz")
+    await handleMessagePartUpdated(makeSubtaskPartUpdated(), ctx)
+    expect(counters.subtask.calls.at(0)!.attrs["project.id"]).toBe("proj_xyz")
+  })
+
+  test("does not record subtask counter when subtask.count is disabled", async () => {
+    const { ctx, counters } = makeCtx("proj_test", ["subtask.count"])
+    await handleMessagePartUpdated(makeSubtaskPartUpdated(), ctx)
+    expect(counters.subtask.calls).toHaveLength(0)
+  })
+
+  test("still emits subtask_invoked log when subtask.count is disabled", async () => {
+    const { ctx, logger } = makeCtx("proj_test", ["subtask.count"])
+    await handleMessagePartUpdated(makeSubtaskPartUpdated(), ctx)
+    expect(logger.records.at(0)!.body).toBe("subtask_invoked")
+  })
+
+  test("does not affect tool handling for non-subtask non-tool parts", async () => {
+    const { ctx, counters, histograms } = makeCtx()
+    const e = {
+      type: "message.part.updated",
+      properties: { part: { type: "text", text: "hello", sessionID: "ses_1" } },
+    } as unknown as EventMessagePartUpdated
+    await handleMessagePartUpdated(e, ctx)
+    expect(counters.subtask.calls).toHaveLength(0)
     expect(histograms.tool.calls).toHaveLength(0)
   })
 })

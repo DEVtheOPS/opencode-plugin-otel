@@ -48,5 +48,6 @@ export function accumulateSessionTotals(
     tokens: existing.tokens + tokens,
     cost: existing.cost + cost,
     messages: existing.messages + 1,
+    agent: existing.agent,
   })
 }

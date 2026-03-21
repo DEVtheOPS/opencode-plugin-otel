@@ -200,15 +200,48 @@ describe("OPENCODE_DISABLE_METRICS", () => {
     })
   })
 
+  describe("subtask.count disabled", () => {
+    test("does not increment subtask counter", async () => {
+      const { ctx, counters } = makeCtx("proj_test", ["subtask.count"])
+      const e = {
+        type: "message.part.updated",
+        properties: {
+          part: { type: "subtask", sessionID: "ses_1", messageID: "msg_1", agent: "build", description: "desc", prompt: "prompt" },
+        },
+      } as unknown as EventMessagePartUpdated
+      await handleMessagePartUpdated(e, ctx)
+      expect(counters.subtask.calls).toHaveLength(0)
+    })
+
+    test("still emits subtask_invoked log record", async () => {
+      const { ctx, logger } = makeCtx("proj_test", ["subtask.count"])
+      const e = {
+        type: "message.part.updated",
+        properties: {
+          part: { type: "subtask", sessionID: "ses_1", messageID: "msg_1", agent: "build", description: "desc", prompt: "prompt" },
+        },
+      } as unknown as EventMessagePartUpdated
+      await handleMessagePartUpdated(e, ctx)
+      expect(logger.records.at(0)!.body).toBe("subtask_invoked")
+    })
+  })
+
   describe("multiple disabled at once", () => {
     test("disabling all metrics stops all counter/histogram calls", async () => {
       const all = [
         "session.count", "token.usage", "cost.usage", "lines_of_code.count",
         "commit.count", "tool.duration", "cache.count", "session.duration",
         "message.count", "session.token.total", "session.cost.total",
-        "model.usage", "retry.count",
+        "model.usage", "retry.count", "subtask.count",
       ]
       const { ctx, counters, histograms, gauges } = makeCtx("proj_test", all)
+      const subtaskEvent = {
+        type: "message.part.updated",
+        properties: {
+          part: { type: "subtask", sessionID: "ses_1", messageID: "msg_1", agent: "build", description: "desc", prompt: "prompt" },
+        },
+      } as unknown as EventMessagePartUpdated
+
       await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
       await handleMessageUpdated(makeAssistantMessage(), ctx)
       handleSessionIdle(makeSessionIdle("ses_1"), ctx)
@@ -217,6 +250,7 @@ describe("OPENCODE_DISABLE_METRICS", () => {
       handleCommandExecuted(makeCommandExecuted("git commit -m 'test'"), ctx)
       await handleMessagePartUpdated(makeToolPart("running"), ctx)
       await handleMessagePartUpdated(makeToolPart("completed"), ctx)
+      await handleMessagePartUpdated(subtaskEvent, ctx)
 
       expect(counters.session.calls).toHaveLength(0)
       expect(counters.token.calls).toHaveLength(0)
@@ -227,6 +261,7 @@ describe("OPENCODE_DISABLE_METRICS", () => {
       expect(counters.retry.calls).toHaveLength(0)
       expect(counters.lines.calls).toHaveLength(0)
       expect(counters.commit.calls).toHaveLength(0)
+      expect(counters.subtask.calls).toHaveLength(0)
       expect(histograms.tool.calls).toHaveLength(0)
       expect(histograms.sessionDuration.calls).toHaveLength(0)
       expect(gauges.sessionToken.calls).toHaveLength(0)
