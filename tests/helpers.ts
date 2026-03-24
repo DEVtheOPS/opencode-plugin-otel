@@ -1,7 +1,7 @@
 import type { HandlerContext, Instruments } from "../src/types.ts"
 import type { Logger as OtelLogger, LogRecord } from "@opentelemetry/api-logs"
 import type { Counter, Histogram, Span, SpanOptions, Tracer, Context, SpanContext, SpanStatus, Attributes } from "@opentelemetry/api"
-import { SpanStatusCode } from "@opentelemetry/api"
+import { SpanStatusCode, trace } from "@opentelemetry/api"
 
 export type SpyCounter = {
   calls: Array<{ value: number; attrs: Record<string, unknown> }>
@@ -30,6 +30,7 @@ export type SpySpan = {
   ended: boolean
   status: SpanStatus
   attributes: Record<string, unknown>
+  parentSpan: SpySpan | undefined
   setStatus(status: SpanStatus): SpySpan
   setAttribute(key: string, value: unknown): SpySpan
   setAttributes(attrs: Attributes): SpySpan
@@ -69,7 +70,7 @@ function makePluginLog(): SpyPluginLog {
   return spy
 }
 
-function makeSpan(name: string, startTime?: number): SpySpan {
+function makeSpan(name: string, startTime?: number, parentSpan?: SpySpan): SpySpan {
   const span: SpySpan = {
     name,
     startTime,
@@ -77,6 +78,7 @@ function makeSpan(name: string, startTime?: number): SpySpan {
     ended: false,
     status: { code: SpanStatusCode.UNSET },
     attributes: {},
+    parentSpan,
     setStatus(s) { span.status = s; return span },
     setAttribute(k, v) { span.attributes[k] = v; return span },
     setAttributes(attrs) { Object.assign(span.attributes, attrs); return span },
@@ -93,8 +95,13 @@ function makeSpan(name: string, startTime?: number): SpySpan {
 export function makeTracer(): SpyTracer {
   const tracer: SpyTracer = {
     spans: [],
-    startSpan(name, options) {
-      const span = makeSpan(name, typeof options?.startTime === "number" ? options.startTime : undefined)
+    startSpan(name, options, ctx) {
+      const parentFromCtx = ctx ? trace.getSpan(ctx) as SpySpan | undefined : undefined
+      const span = makeSpan(
+        name,
+        typeof options?.startTime === "number" ? options.startTime : undefined,
+        parentFromCtx,
+      )
       if (options?.attributes) Object.assign(span.attributes, options.attributes)
       tracer.spans.push(span)
       return span

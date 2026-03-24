@@ -272,14 +272,14 @@ describe("handleMessagePartUpdated", () => {
     expect(histograms.tool.calls.at(0)!.value).toBe(1000)
   })
 
-  test("emits tool_result log on success", async () => {
+  test("emits tool_result log on success with exact byte length", async () => {
     const { ctx, logger } = makeCtx()
     await handleMessagePartUpdated(makeToolPartUpdated("running"), ctx)
     await handleMessagePartUpdated(makeToolPartUpdated("completed"), ctx)
     const record = logger.records.at(0)!
     expect(record.body).toBe("tool_result")
     expect(record.attributes?.["success"]).toBe(true)
-    expect(record.attributes?.["tool_result_size_bytes"]).toBeGreaterThan(0)
+    expect(record.attributes?.["tool_result_size_bytes"]).toBe(Buffer.byteLength("result output", "utf8"))
   })
 
   test("emits error-severity log on tool error", async () => {

@@ -76,7 +76,8 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
     cost_usd: assistant.cost,
   })
 
-  const msgSpan = ctx.messageSpans.get(assistant.id)
+  const msgKey = `${sessionID}:${assistant.id}`
+  const msgSpan = ctx.messageSpans.get(msgKey)
   if (msgSpan) {
     msgSpan.setAttributes({
       "gen_ai.usage.input_tokens": assistant.tokens.input,
@@ -94,7 +95,7 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
       msgSpan.setStatus({ code: SpanStatusCode.OK })
     }
     msgSpan.end(assistant.time.completed)
-    ctx.messageSpans.delete(assistant.id)
+    ctx.messageSpans.delete(msgKey)
   }
 
   if (assistant.error) {
@@ -333,7 +334,8 @@ export function startMessageSpan(
   ctx: HandlerContext,
 ) {
   if (!isTraceEnabled("llm", ctx)) return
-  if (ctx.messageSpans.has(messageID)) return
+  const msgKey = `${sessionID}:${messageID}`
+  if (ctx.messageSpans.has(msgKey)) return
   const sessionSpan = ctx.sessionSpans.get(sessionID)
   const parentCtx = sessionSpan
     ? trace.setSpan(context.active(), sessionSpan)
@@ -353,5 +355,5 @@ export function startMessageSpan(
     },
     parentCtx,
   )
-  setBoundedMap(ctx.messageSpans, messageID, msgSpan)
+  setBoundedMap(ctx.messageSpans, msgKey, msgSpan)
 }

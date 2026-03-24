@@ -61,12 +61,12 @@ function sweepSession(sessionID: string, ctx: HandlerContext) {
       ctx.pendingToolSpans.delete(key)
     }
   }
-  for (const [msgID, span] of ctx.messageSpans) {
-    const attrs = (span as unknown as { attributes?: Record<string, unknown> }).attributes
-    if (attrs?.["session.id"] === sessionID) {
+  const msgPrefix = `${sessionID}:`
+  for (const [key, span] of ctx.messageSpans) {
+    if (key.startsWith(msgPrefix)) {
       span.setStatus({ code: SpanStatusCode.ERROR, message: "session ended before message completed" })
       span.end()
-      ctx.messageSpans.delete(msgID)
+      ctx.messageSpans.delete(key)
     }
   }
 }

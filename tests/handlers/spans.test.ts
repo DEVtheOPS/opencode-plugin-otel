@@ -23,8 +23,11 @@ function makeSessionIdle(sessionID: string): EventSessionIdle {
   return { type: "session.idle", properties: { sessionID } } as EventSessionIdle
 }
 
-function makeSessionError(sessionID: string, error?: { name: string }): EventSessionError {
-  return { type: "session.error", properties: { sessionID, error } } as unknown as EventSessionError
+function makeSessionError(sessionID?: string, error?: { name: string }): EventSessionError {
+  return {
+    type: "session.error",
+    properties: { ...(sessionID !== undefined ? { sessionID } : {}), error },
+  } as unknown as EventSessionError
 }
 
 function makeAssistantMessageUpdated(overrides: {
@@ -57,7 +60,7 @@ function makeAssistantMessageUpdated(overrides: {
 
 function makeToolPartUpdated(
   status: "running" | "completed" | "error",
-  overrides: { sessionID?: string; callID?: string; tool?: string; startMs?: number; endMs?: number } = {},
+  overrides: { sessionID?: string; callID?: string; tool?: string; startMs?: number; endMs?: number; output?: string } = {},
 ): EventMessagePartUpdated {
   const sessionID = overrides.sessionID ?? "ses_1"
   const callID = overrides.callID ?? "call_1"
@@ -67,7 +70,7 @@ function makeToolPartUpdated(
     status === "running"
       ? { status: "running", time: { start } }
       : status === "completed"
-        ? { status: "completed", time: { start, end }, output: "ok" }
+        ? { status: "completed", time: { start, end }, output: overrides.output ?? "ok" }
         : { status: "error", time: { start, end }, error: "fail" }
   return {
     type: "message.part.updated",
@@ -147,12 +150,21 @@ describe("session spans", () => {
     expect(tracer.spans).toHaveLength(0)
   })
 
+  test("session.error with undefined sessionID does not end any span", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleSessionError(makeSessionError(undefined, { name: "UnknownError" }), ctx)
+    expect(ctx.sessionSpans.has("ses_1")).toBe(true)
+    expect(tracer.spans[0]!.ended).toBe(false)
+  })
+
   test("subagent span — parent session span is in sessionSpans before child is created", () => {
     const { ctx, tracer } = makeCtx()
     handleSessionCreated(makeSessionCreated("ses_parent"), ctx)
     handleSessionCreated(makeSessionCreated("ses_child", 2000, "ses_parent"), ctx)
     expect(tracer.spans).toHaveLength(2)
     expect(tracer.spans[1]!.name).toBe("opencode.session")
+    expect(tracer.spans[1]!.parentSpan).toBe(tracer.spans[0])
   })
 
   test("subagent span — no error when parent session span is absent", () => {
@@ -197,11 +209,13 @@ describe("tool spans", () => {
     expect(span.status.code).toBe(SpanStatusCode.ERROR)
   })
 
-  test("tool span result_size_bytes set on success", () => {
+  test("tool span result_size_bytes matches exact byte length of multibyte output", () => {
     const { ctx, tracer } = makeCtx()
+    const multibyte = "こんにちは"
+    const expectedBytes = Buffer.byteLength(multibyte, "utf8")
     handleMessagePartUpdated(makeToolPartUpdated("running"), ctx)
-    handleMessagePartUpdated(makeToolPartUpdated("completed"), ctx)
-    expect(typeof tracer.spans[0]!.attributes["tool.result_size_bytes"]).toBe("number")
+    handleMessagePartUpdated(makeToolPartUpdated("completed", { output: multibyte }), ctx)
+    expect(tracer.spans[0]!.attributes["tool.result_size_bytes"]).toBe(expectedBytes)
   })
 
   test("tool span error attr set on error status", () => {
@@ -232,6 +246,7 @@ describe("tool spans", () => {
     handleMessagePartUpdated(makeToolPartUpdated("running", { sessionID: "ses_1" }), ctx)
     expect(tracer.spans).toHaveLength(2)
     expect(tracer.spans[1]!.name).toBe("opencode.tool bash")
+    expect(tracer.spans[1]!.parentSpan).toBe(tracer.spans[0])
   })
 })
 
@@ -241,7 +256,7 @@ describe("message (LLM) spans", () => {
     startMessageSpan("ses_1", "msg_1", "claude-3-5-sonnet", "anthropic", 1000, ctx)
     expect(tracer.spans).toHaveLength(1)
     expect(tracer.spans[0]!.name).toBe("gen_ai.chat")
-    expect(ctx.messageSpans.has("msg_1")).toBe(true)
+    expect(ctx.messageSpans.has("ses_1:msg_1")).toBe(true)
   })
 
   test("startMessageSpan sets gen_ai.* attributes", () => {
@@ -251,7 +266,7 @@ describe("message (LLM) spans", () => {
     expect(tracer.spans[0]!.attributes["gen_ai.request.model"]).toBe("gpt-4o")
   })
 
-  test("startMessageSpan is a no-op when span already exists for messageID", () => {
+  test("startMessageSpan is a no-op when span already exists for sessionID:messageID", () => {
     const { ctx, tracer } = makeCtx()
     startMessageSpan("ses_1", "msg_1", "claude", "anthropic", 1000, ctx)
     startMessageSpan("ses_1", "msg_1", "claude", "anthropic", 1000, ctx)
@@ -265,7 +280,7 @@ describe("message (LLM) spans", () => {
     const span = tracer.spans[0]!
     expect(span.ended).toBe(true)
     expect(span.endTime).toBe(2000)
-    expect(ctx.messageSpans.has("msg_1")).toBe(false)
+    expect(ctx.messageSpans.has("ses_1:msg_1")).toBe(false)
   })
 
   test("handleMessageUpdated sets OK status on success", () => {
@@ -302,10 +317,12 @@ describe("message (LLM) spans", () => {
   })
 
   test("handleMessageUpdated no-ops span handling when no span exists for messageID", () => {
-    const { ctx } = makeCtx()
-    expect(() =>
-      handleMessageUpdated(makeAssistantMessageUpdated({ id: "msg_no_span" }), ctx)
-    ).not.toThrow()
+    const { ctx, tracer } = makeCtx()
+    const spansBefore = tracer.spans.length
+    const mapSizeBefore = ctx.messageSpans.size
+    handleMessageUpdated(makeAssistantMessageUpdated({ id: "msg_no_span" }), ctx)
+    expect(tracer.spans).toHaveLength(spansBefore)
+    expect(ctx.messageSpans.size).toBe(mapSizeBefore)
   })
 
   test("message span is parented to session span when available", () => {
@@ -314,6 +331,7 @@ describe("message (LLM) spans", () => {
     startMessageSpan("ses_1", "msg_1", "claude", "anthropic", 1000, ctx)
     expect(tracer.spans).toHaveLength(2)
     expect(tracer.spans[1]!.name).toBe("gen_ai.chat")
+    expect(tracer.spans[1]!.parentSpan).toBe(tracer.spans[0])
   })
 })
 
@@ -356,7 +374,7 @@ describe("orphaned span cleanup", () => {
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     startMessageSpan("ses_1", "msg_orphan", "claude", "anthropic", 1000, ctx)
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
-    expect(ctx.messageSpans.has("msg_orphan")).toBe(false)
+    expect(ctx.messageSpans.has("ses_1:msg_orphan")).toBe(false)
     const msgSpan = tracer.spans.find(s => s.name === "gen_ai.chat")!
     expect(msgSpan.ended).toBe(true)
     expect(msgSpan.status.code).toBe(SpanStatusCode.ERROR)
@@ -367,7 +385,7 @@ describe("orphaned span cleanup", () => {
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     startMessageSpan("ses_1", "msg_orphan", "claude", "anthropic", 1000, ctx)
     handleSessionError(makeSessionError("ses_1"), ctx)
-    expect(ctx.messageSpans.has("msg_orphan")).toBe(false)
+    expect(ctx.messageSpans.has("ses_1:msg_orphan")).toBe(false)
     const msgSpan = tracer.spans.find(s => s.name === "gen_ai.chat")!
     expect(msgSpan.ended).toBe(true)
     expect(msgSpan.status.code).toBe(SpanStatusCode.ERROR)
