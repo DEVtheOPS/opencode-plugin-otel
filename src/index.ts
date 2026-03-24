@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { logs } from "@opentelemetry/api-logs"
+import { trace } from "@opentelemetry/api"
 import pkg from "../package.json" with { type: "json" }
 import type {
   EventSessionCreated,
@@ -19,7 +20,7 @@ import { loadConfig, resolveLogLevel } from "./config.ts"
 import { probeEndpoint } from "./probe.ts"
 import { setupOtel, createInstruments } from "./otel.ts"
 import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus } from "./handlers/session.ts"
-import { handleMessageUpdated, handleMessagePartUpdated } from "./handlers/message.ts"
+import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "./handlers/message.ts"
 import { handlePermissionUpdated, handlePermissionReplied } from "./handlers/permission.ts"
 import { handleSessionDiff, handleCommandExecuted } from "./handlers/activity.ts"
 
@@ -67,7 +68,7 @@ export const OtelPlugin: Plugin = async ({ project, client }) => {
     })
   }
 
-  const { meterProvider, loggerProvider } = setupOtel(
+  const { meterProvider, loggerProvider, tracerProvider } = setupOtel(
     config.endpoint,
     config.metricsInterval,
     config.logsInterval,
@@ -77,9 +78,12 @@ export const OtelPlugin: Plugin = async ({ project, client }) => {
 
   const instruments = createInstruments(config.metricPrefix)
   const logger = logs.getLogger("com.opencode")
+  const tracer = trace.getTracer("com.opencode")
   const pendingToolSpans = new Map()
   const pendingPermissions = new Map()
   const sessionTotals = new Map()
+  const sessionSpans = new Map()
+  const messageSpans = new Map()
   const { disabledMetrics } = config
   const commonAttrs = { "project.id": project.id } as const
 
@@ -96,10 +100,13 @@ export const OtelPlugin: Plugin = async ({ project, client }) => {
     pendingPermissions,
     sessionTotals,
     disabledMetrics,
+    tracer,
+    sessionSpans,
+    messageSpans,
   }
 
   async function shutdown() {
-    await Promise.allSettled([meterProvider.shutdown(), loggerProvider.shutdown()])
+    await Promise.allSettled([meterProvider.shutdown(), loggerProvider.shutdown(), tracerProvider.shutdown()])
   }
 
   process.on("SIGTERM", () => { shutdown().then(() => process.exit(0)).catch(() => process.exit(1)) })
@@ -187,9 +194,22 @@ export const OtelPlugin: Plugin = async ({ project, client }) => {
         case "permission.replied":
           handlePermissionReplied(event as EventPermissionReplied, ctx)
           break
-        case "message.updated":
-          await handleMessageUpdated(event as EventMessageUpdated, ctx)
+        case "message.updated": {
+          const msgEvt = event as EventMessageUpdated
+          const info = msgEvt.properties.info
+          if (info.role === "assistant" && !info.time?.completed) {
+            startMessageSpan(
+              info.sessionID,
+              info.id,
+              info.modelID ?? "unknown",
+              info.providerID ?? "unknown",
+              info.time?.created ?? Date.now(),
+              ctx,
+            )
+          }
+          await handleMessageUpdated(msgEvt, ctx)
           break
+        }
         case "message.part.updated":
           await handleMessagePartUpdated(event as EventMessagePartUpdated, ctx)
           break

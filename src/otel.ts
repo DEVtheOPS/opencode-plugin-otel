@@ -1,9 +1,11 @@
 import { logs } from "@opentelemetry/api-logs"
-import { metrics } from "@opentelemetry/api"
+import { metrics, trace } from "@opentelemetry/api"
 import { LoggerProvider, BatchLogRecordProcessor } from "@opentelemetry/sdk-logs"
 import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics"
+import { BasicTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-base"
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-grpc"
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-grpc"
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc"
 import { resourceFromAttributes } from "@opentelemetry/resources"
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions"
 import { ATTR_HOST_ARCH } from "@opentelemetry/semantic-conventions/incubating"
@@ -39,11 +41,13 @@ export function buildResource(version: string) {
 export type OtelProviders = {
   meterProvider: MeterProvider
   loggerProvider: LoggerProvider
+  tracerProvider: BasicTracerProvider
 }
 
 /**
- * Initialises the OTel SDK — creates a `MeterProvider` and `LoggerProvider` backed by
- * OTLP/gRPC exporters pointed at `endpoint`, and registers them as the global providers.
+ * Initialises the OTel SDK — creates a `MeterProvider`, `LoggerProvider`, and
+ * `BasicTracerProvider` backed by OTLP/gRPC exporters pointed at `endpoint`, and
+ * registers them as the global providers.
  */
 export function setupOtel(
   endpoint: string,
@@ -74,7 +78,13 @@ export function setupOtel(
   })
   logs.setGlobalLoggerProvider(loggerProvider)
 
-  return { meterProvider, loggerProvider }
+  const tracerProvider = new BasicTracerProvider({
+    resource,
+    spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter({ url: endpoint }))],
+  })
+  trace.setGlobalTracerProvider(tracerProvider)
+
+  return { meterProvider, loggerProvider, tracerProvider }
 }
 
 /** Creates all metric instruments using the global `MeterProvider`. Metric names are prefixed with `prefix`. */

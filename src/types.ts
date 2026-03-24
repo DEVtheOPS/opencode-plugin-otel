@@ -1,4 +1,4 @@
-import type { Counter, Histogram } from "@opentelemetry/api"
+import type { Counter, Histogram, Span, Tracer } from "@opentelemetry/api"
 import type { Logger as OtelLogger } from "@opentelemetry/api-logs"
 
 /** Numeric priority map for log levels; higher value = higher severity. */
@@ -25,6 +25,7 @@ export type PendingToolSpan = {
   tool: string
   sessionID: string
   startMs: number
+  span: Span
 }
 
 /** Permission prompt tracked between `permission.updated` and `permission.replied`. */
@@ -71,4 +72,7 @@ export type HandlerContext = {
   pendingPermissions: Map<string, PendingPermission>
   sessionTotals: Map<string, SessionTotals>
   disabledMetrics: Set<string>
+  tracer: Tracer
+  sessionSpans: Map<string, Span>
+  messageSpans: Map<string, Span>
 }

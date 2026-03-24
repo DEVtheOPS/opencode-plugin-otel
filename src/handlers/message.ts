@@ -1,4 +1,5 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
+import { SpanStatusCode, SpanKind, context, trace } from "@opentelemetry/api"
 import type { AssistantMessage, EventMessageUpdated, EventMessagePartUpdated, ToolPart } from "@opencode-ai/sdk"
 import { errorSummary, setBoundedMap, accumulateSessionTotals, isMetricEnabled } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
@@ -13,8 +14,8 @@ type SubtaskPart = {
 }
 
 /**
- * Handles a completed assistant message: increments token and cost counters and emits
- * either an `api_request` or `api_error` log event depending on whether the message errored.
+ * Handles a completed assistant message: increments token and cost counters, emits
+ * either an `api_request` or `api_error` log event, and ends the LLM span for this message.
  * The `agent` attribute is sourced from the session totals, which are populated by the
  * `chat.message` hook when the user prompt is received.
  */
@@ -74,6 +75,27 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
     cacheWrite: assistant.tokens.cache.write,
     cost_usd: assistant.cost,
   })
+
+  const msgSpan = ctx.messageSpans.get(assistant.id)
+  if (msgSpan) {
+    msgSpan.setAttributes({
+      "gen_ai.usage.input_tokens": assistant.tokens.input,
+      "gen_ai.usage.output_tokens": assistant.tokens.output,
+      "gen_ai.usage.reasoning_tokens": assistant.tokens.reasoning,
+      "gen_ai.usage.cache_read_tokens": assistant.tokens.cache.read,
+      "gen_ai.usage.cache_creation_tokens": assistant.tokens.cache.write,
+      "gen_ai.response.finish_reason": assistant.error ? "error" : "stop",
+      cost_usd: assistant.cost,
+      duration_ms: duration,
+    })
+    if (assistant.error) {
+      msgSpan.setStatus({ code: SpanStatusCode.ERROR, message: errorSummary(assistant.error) })
+    } else {
+      msgSpan.setStatus({ code: SpanStatusCode.OK })
+    }
+    msgSpan.end(assistant.time.completed)
+    ctx.messageSpans.delete(assistant.id)
+  }
 
   if (assistant.error) {
     ctx.logger.emit({
@@ -137,9 +159,13 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
 
 /**
  * Tracks tool execution time between `running` and `completed`/`error` part updates,
- * records a `tool.duration` histogram measurement, and emits a `tool_result` log event.
- * Also handles `subtask` parts, incrementing the sub-agent invocation counter and emitting
- * a `subtask_invoked` log event.
+ * records a `tool.duration` histogram measurement, manages the tool child span, and emits
+ * a `tool_result` log event. Also handles `subtask` parts, incrementing the sub-agent
+ * invocation counter and emitting a `subtask_invoked` log event.
+ *
+ * For tool spans: on `running` a child span of the current session span is started and stored
+ * in `pendingToolSpans`. On `completed`/`error` the span is ended with appropriate status.
+ * If no `running` event was seen (out-of-order), a best-effort span is started and immediately ended.
  */
 export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: HandlerContext) {
   const part = e.properties.part
@@ -175,70 +201,151 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
     })
   }
 
-  if (part.type !== "tool") return
+  if (part.type === "tool") {
+    const toolPart = part as ToolPart
+    const key = `${toolPart.sessionID}:${toolPart.callID}`
 
-  const toolPart = part as ToolPart
-  const key = `${toolPart.sessionID}:${toolPart.callID}`
+    if (toolPart.state.status === "running") {
+      const sessionSpan = ctx.sessionSpans.get(toolPart.sessionID)
+      const parentCtx = sessionSpan
+        ? trace.setSpan(context.active(), sessionSpan)
+        : context.active()
 
-  if (toolPart.state.status === "running") {
-    setBoundedMap(ctx.pendingToolSpans, key, {
-      tool: toolPart.tool,
-      sessionID: toolPart.sessionID,
-      startMs: toolPart.state.time.start,
+      const toolSpan = ctx.tracer.startSpan(
+        `opencode.tool ${toolPart.tool}`,
+        {
+          startTime: toolPart.state.time.start,
+          kind: SpanKind.INTERNAL,
+          attributes: {
+            "session.id": toolPart.sessionID,
+            "tool.name": toolPart.tool,
+            ...ctx.commonAttrs,
+          },
+        },
+        parentCtx,
+      )
+      setBoundedMap(ctx.pendingToolSpans, key, {
+        tool: toolPart.tool,
+        sessionID: toolPart.sessionID,
+        startMs: toolPart.state.time.start,
+        span: toolSpan,
+      })
+      ctx.log("debug", "otel: tool span started", { sessionID: toolPart.sessionID, tool: toolPart.tool, key })
+      return
+    }
+
+    if (toolPart.state.status !== "completed" && toolPart.state.status !== "error") return
+
+    const pending = ctx.pendingToolSpans.get(key)
+    ctx.pendingToolSpans.delete(key)
+    const start = pending?.startMs ?? toolPart.state.time.start
+    const end = toolPart.state.time.end
+    if (end === undefined) return
+    const duration_ms = end - start
+    const success = toolPart.state.status === "completed"
+
+    if (isMetricEnabled("tool.duration", ctx)) {
+      ctx.instruments.toolDurationHistogram.record(duration_ms, {
+        ...ctx.commonAttrs,
+        "session.id": toolPart.sessionID,
+        tool_name: toolPart.tool,
+        success,
+      })
+    }
+
+    const toolSpan = pending?.span ?? ctx.tracer.startSpan(
+      `opencode.tool ${toolPart.tool}`,
+      {
+        startTime: start,
+        kind: SpanKind.INTERNAL,
+        attributes: {
+          "session.id": toolPart.sessionID,
+          "tool.name": toolPart.tool,
+          ...ctx.commonAttrs,
+        },
+      },
+    )
+    toolSpan.setAttribute("tool.success", success)
+    if (success) {
+      const output = (toolPart.state as { output: string }).output
+      toolSpan.setAttribute("tool.result_size_bytes", Buffer.byteLength(output, "utf8"))
+      toolSpan.setStatus({ code: SpanStatusCode.OK })
+    } else {
+      const err = (toolPart.state as { error: string }).error
+      toolSpan.setAttribute("tool.error", err)
+      toolSpan.setStatus({ code: SpanStatusCode.ERROR, message: err })
+    }
+    toolSpan.end(end)
+
+    const sizeAttr = success
+      ? { tool_result_size_bytes: Buffer.byteLength((toolPart.state as { output: string }).output, "utf8") }
+      : { error: (toolPart.state as { error: string }).error }
+
+    ctx.logger.emit({
+      severityNumber: success ? SeverityNumber.INFO : SeverityNumber.ERROR,
+      severityText: success ? "INFO" : "ERROR",
+      timestamp: start,
+      observedTimestamp: Date.now(),
+      body: "tool_result",
+      attributes: {
+        "event.name": "tool_result",
+        "session.id": toolPart.sessionID,
+        tool_name: toolPart.tool,
+        success,
+        duration_ms,
+        ...sizeAttr,
+        ...ctx.commonAttrs,
+      },
     })
-    ctx.log("debug", "otel: tool span started", { sessionID: toolPart.sessionID, tool: toolPart.tool, key })
-    return
-  }
-
-  if (toolPart.state.status !== "completed" && toolPart.state.status !== "error") return
-
-  const span = ctx.pendingToolSpans.get(key)
-  ctx.pendingToolSpans.delete(key)
-  const start = span?.startMs ?? toolPart.state.time.start
-  const end = toolPart.state.time.end
-  if (end === undefined) return
-  const duration_ms = end - start
-  const success = toolPart.state.status === "completed"
-
-  if (isMetricEnabled("tool.duration", ctx)) {
-    ctx.instruments.toolDurationHistogram.record(duration_ms, {
-      ...ctx.commonAttrs,
-      "session.id": toolPart.sessionID,
+    ctx.log("debug", "otel: tool.duration histogram recorded", {
+      sessionID: toolPart.sessionID,
       tool_name: toolPart.tool,
+      duration_ms,
       success,
     })
-  }
-
-  const sizeAttr = success
-    ? { tool_result_size_bytes: Buffer.byteLength((toolPart.state as { output: string }).output, "utf8") }
-    : { error: (toolPart.state as { error: string }).error }
-
-  ctx.logger.emit({
-    severityNumber: success ? SeverityNumber.INFO : SeverityNumber.ERROR,
-    severityText: success ? "INFO" : "ERROR",
-    timestamp: start,
-    observedTimestamp: Date.now(),
-    body: "tool_result",
-    attributes: {
-      "event.name": "tool_result",
-      "session.id": toolPart.sessionID,
+    return ctx.log(success ? "info" : "error", "otel: tool_result", {
+      sessionID: toolPart.sessionID,
       tool_name: toolPart.tool,
       success,
       duration_ms,
-      ...sizeAttr,
-      ...ctx.commonAttrs,
+    })
+  }
+}
+
+/**
+ * Starts an LLM span for an assistant message when it first appears in `message.updated`.
+ * The span is parented to the session span and carries `gen_ai.*` semantic attributes for
+ * the model and provider. It is ended in `handleMessageUpdated` once the message completes.
+ *
+ * Only called for assistant messages that have not yet completed (`time.completed` absent).
+ */
+export function startMessageSpan(
+  sessionID: string,
+  messageID: string,
+  modelID: string,
+  providerID: string,
+  startTime: number,
+  ctx: HandlerContext,
+) {
+  if (ctx.messageSpans.has(messageID)) return
+  const sessionSpan = ctx.sessionSpans.get(sessionID)
+  const parentCtx = sessionSpan
+    ? trace.setSpan(context.active(), sessionSpan)
+    : context.active()
+
+  const msgSpan = ctx.tracer.startSpan(
+    "gen_ai.chat",
+    {
+      startTime,
+      kind: SpanKind.CLIENT,
+      attributes: {
+        "gen_ai.system": providerID,
+        "gen_ai.request.model": modelID,
+        "session.id": sessionID,
+        ...ctx.commonAttrs,
+      },
     },
-  })
-  ctx.log("debug", "otel: tool.duration histogram recorded", {
-    sessionID: toolPart.sessionID,
-    tool_name: toolPart.tool,
-    duration_ms,
-    success,
-  })
-  return ctx.log(success ? "info" : "error", "otel: tool_result", {
-    sessionID: toolPart.sessionID,
-    tool_name: toolPart.tool,
-    success,
-    duration_ms,
-  })
+    parentCtx,
+  )
+  setBoundedMap(ctx.messageSpans, messageID, msgSpan)
 }
