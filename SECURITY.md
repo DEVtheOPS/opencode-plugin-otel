@@ -12,7 +12,7 @@
 If you discover a security vulnerability, please report it responsibly:
 
 1. **Do not** open a public issue
-2. Email the maintainer at security@devtheops.com
+2. Email the maintainer at <security@devtheops.com>
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce

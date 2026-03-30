@@ -1,41 +1,7 @@
 {
-  "name": "@devtheops/opencode-plugin-otel",
-  "version": "0.6.0",
-  "description": "OpenTelemetry telemetry plugin for opencode CLI",
-  "keywords": [
-    "opentelemetry",
-    "otel",
-    "telemetry",
-    "opencode",
-    "plugin",
-    "observability"
-  ],
-  "license": "MPL-2.0",
   "author": "DEVtheOPS",
-  "homepage": "https://github.com/DEVtheOPS/opencode-plugin-otel#readme",
   "bugs": {
     "url": "https://github.com/DEVtheOPS/opencode-plugin-otel/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/DEVtheOPS/opencode-plugin-otel.git"
-  },
-  "type": "module",
-  "main": "src/index.ts",
-  "module": "src/index.ts",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "files": [
-    "src/"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit",
-    "lint": "bun --bun eslint .",
-    "check:jsdoc-coverage": "bun scripts/check-jsdoc-coverage.mjs"
   },
   "dependencies": {
     "@opencode-ai/plugin": "^1.2.23",
@@ -54,10 +20,44 @@
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "typescript": "^5.9.3"
   },
+  "description": "OpenTelemetry telemetry plugin for opencode CLI",
   "devDependencies": {
     "@types/bun": "latest",
     "@typescript-eslint/parser": "^8.30.1",
     "eslint": "^9.24.0",
     "eslint-plugin-jsdoc": "^50.6.11"
-  }
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src/"
+  ],
+  "homepage": "https://github.com/DEVtheOPS/opencode-plugin-otel#readme",
+  "keywords": [
+    "opentelemetry",
+    "otel",
+    "telemetry",
+    "opencode",
+    "plugin",
+    "observability"
+  ],
+  "license": "MPL-2.0",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "name": "@devtheops/opencode-plugin-otel",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DEVtheOPS/opencode-plugin-otel.git"
+  },
+  "scripts": {
+    "check:jsdoc-coverage": "bun scripts/check-jsdoc-coverage.mjs",
+    "lint": "bun --bun eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "version": "0.6.0"
 }
