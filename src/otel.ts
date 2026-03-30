@@ -56,8 +56,8 @@ export function buildHttpSignalUrl(endpoint: string, signal: "traces" | "metrics
 
 /**
  * Initialises the OTel SDK — creates a `MeterProvider`, `LoggerProvider`, and
- * `BasicTracerProvider` backed by OTLP/gRPC exporters pointed at `endpoint`, and
- * registers them as the global providers.
+ * `BasicTracerProvider` backed by OTLP exporters (gRPC or HTTP/protobuf)
+ * pointed at `endpoint`, and registers them as the global providers.
  */
 export function setupOtel(
   endpoint: string,
