@@ -23,6 +23,20 @@ repos:
 
   - repo: local
     hooks:
+      - id: eslint
+        name: ESLint
+        language: system
+        entry: bun run lint
+        pass_filenames: false
+        types: [ts]
+
+      - id: jsdoc-coverage
+        name: JSDoc coverage
+        language: system
+        entry: bun run check:jsdoc-coverage
+        pass_filenames: false
+        types: [ts]
+
       - id: typecheck
         name: TypeScript typecheck
         language: system

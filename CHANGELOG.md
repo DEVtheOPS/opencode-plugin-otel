@@ -6,8 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
-## [0.6.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.5.0...v0.6.0) (2026-03-26)
+## [Unreleased]
 
+### Features
+
+* **otel:** add OTLP HTTP/protobuf exporter support via `OPENCODE_OTLP_PROTOCOL`
+
+## [0.6.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.5.0...v0.6.0) (2026-03-26)
 
 ### Features
 
@@ -15,20 +20,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 * **tracing:** add OpenTelemetry traces with gen_ai.* and tool spans ([0a00b43](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/0a00b43c714c45146ac93b9077c478127727e6ce))
 * **tracing:** add OpenTelemetry traces with gen_ai.* and tool spans ([6c848a7](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/6c848a7bca237ab60e7035244d4889dae44560ca)), closes [#19](https://github.com/DEVtheOPS/opencode-plugin-otel/issues/19)
 
-
 ### Bug Fixes
 
 * **traces:** apply metricPrefix to opencode span names and fix out-of-order parentage ([65f1e70](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/65f1e70ec592a571dd5fd410769920cc5c6e1142))
 
 ## [0.5.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.4.1...v0.5.0) (2026-03-21)
 
-
 ### Features
 
 * **handlers:** add agent usage metrics and sub-agent tracking ([2d12f88](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/2d12f8846425075c4d8aac1573ac6e488bf868c3))
 
 ## [0.4.1](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.4.0...v0.4.1) (2026-03-16)
-
 
 ### Bug Fixes
 
@@ -37,7 +39,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 * **otel:** normalize token and cost units for claude compatibility ([aa3deca](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/aa3deca8cd3323a5d1f9fc749b43d0992f1ba50a))
 
 ## [0.4.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.3.0...v0.4.0) (2026-03-15)
-
 
 ### Features
 

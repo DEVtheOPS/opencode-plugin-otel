@@ -17,6 +17,8 @@
 
 - [ ] I have read the [CONTRIBUTING.md](../CONTRIBUTING.md) document
 - [ ] My code follows the style guidelines of this project
+- [ ] `bun run lint` passes with no errors
+- [ ] `bun run check:jsdoc-coverage` passes with no errors
 - [ ] `bun run typecheck` passes with no errors
 - [ ] `bun test` passes with no errors
 - [ ] I have added tests that prove my fix is effective or that my feature works

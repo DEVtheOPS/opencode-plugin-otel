@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test"
 import { probeEndpoint, parseEndpoint } from "../src/probe.ts"
+import { buildHttpSignalUrl } from "../src/otel.ts"
 
 describe("parseEndpoint", () => {
   test("uses port 80 for http:// URLs without explicit port", () => {
@@ -54,5 +55,19 @@ describe("probeEndpoint", () => {
     } finally {
       server.stop()
     }
+  })
+})
+
+describe("buildHttpSignalUrl", () => {
+  test("appends signal path to a bare host", () => {
+    expect(buildHttpSignalUrl("https://otlp.example.com", "traces")).toBe("https://otlp.example.com/v1/traces")
+  })
+
+  test("appends signal path to a base OTLP path", () => {
+    expect(buildHttpSignalUrl("https://otlp.example.com/otlp", "metrics")).toBe("https://otlp.example.com/otlp/v1/metrics")
+  })
+
+  test("normalizes a trailing slash before appending", () => {
+    expect(buildHttpSignalUrl("https://otlp.example.com/otlp/", "logs")).toBe("https://otlp.example.com/otlp/v1/logs")
   })
 })

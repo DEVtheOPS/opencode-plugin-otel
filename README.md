@@ -6,7 +6,7 @@
 [![Build status](https://img.shields.io/github/actions/workflow/status/DEVtheOPS/opencode-plugin-otel/release-please.yml?branch=main)](https://github.com/DEVtheOPS/opencode-plugin-otel/actions/workflows/release-please.yml)
 [![License](https://img.shields.io/npm/l/@devtheops/opencode-plugin-otel.svg)](https://github.com/DEVtheOPS/opencode-plugin-otel/blob/main/LICENSE)
 
-An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemetry (OTLP/gRPC), mirroring the same signals as [Claude Code's monitoring](https://code.claude.com/docs/en/monitoring-usage).
+An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemetry (OTLP over gRPC or HTTP/protobuf), mirroring the same signals as [Claude Code's monitoring](https://code.claude.com/docs/en/monitoring-usage).
 
 - [What it instruments](#what-it-instruments)
   - [Metrics](#metrics)
@@ -82,7 +82,8 @@ All configuration is via environment variables. Set them in your shell profile (
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENCODE_ENABLE_TELEMETRY` | _(unset)_ | Set to any non-empty value to enable the plugin |
-| `OPENCODE_OTLP_ENDPOINT` | `http://localhost:4317` | gRPC OTLP collector endpoint |
+| `OPENCODE_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP collector endpoint. For `grpc`, use the collector host/port. For `http/protobuf`, use the base URL and the plugin will append `/v1/traces`, `/v1/metrics`, and `/v1/logs`. |
+| `OPENCODE_OTLP_PROTOCOL` | `grpc` | OTLP transport protocol: `grpc` or `http/protobuf` |
 | `OPENCODE_OTLP_METRICS_INTERVAL` | `60000` | Metrics export interval in milliseconds |
 | `OPENCODE_OTLP_LOGS_INTERVAL` | `5000` | Logs export interval in milliseconds |
 | `OPENCODE_METRIC_PREFIX` | `opencode.` | Prefix for all metric names (e.g. set to `claude_code.` for Claude Code dashboard compatibility) |
@@ -95,8 +96,11 @@ All configuration is via environment variables. Set them in your shell profile (
 ```bash
 export OPENCODE_ENABLE_TELEMETRY=1
 export OPENCODE_OTLP_ENDPOINT=http://localhost:4317
+export OPENCODE_OTLP_PROTOCOL=grpc
 opencode
 ```
+
+For `OPENCODE_OTLP_PROTOCOL=http/protobuf`, set `OPENCODE_OTLP_ENDPOINT` to the collector base URL rather than a per-signal path. The plugin expands it to `/v1/traces`, `/v1/metrics`, and `/v1/logs` automatically.
 
 ### Headers and resource attributes
 
@@ -147,6 +151,7 @@ export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.tota
 ```bash
 export OPENCODE_ENABLE_TELEMETRY=1
 export OPENCODE_OTLP_ENDPOINT=https://api.datadoghq.com
+export OPENCODE_OTLP_PROTOCOL=http/protobuf
 ```
 
 ### Honeycomb example
@@ -154,6 +159,16 @@ export OPENCODE_OTLP_ENDPOINT=https://api.datadoghq.com
 ```bash
 export OPENCODE_ENABLE_TELEMETRY=1
 export OPENCODE_OTLP_ENDPOINT=https://api.honeycomb.io
+export OPENCODE_OTLP_PROTOCOL=http/protobuf
+```
+
+### Grafana Cloud example
+
+```bash
+export OPENCODE_ENABLE_TELEMETRY=1
+export OPENCODE_OTLP_ENDPOINT=https://otlp-gateway-prod-us-central-0.grafana.net/otlp
+export OPENCODE_OTLP_PROTOCOL=http/protobuf
+export OPENCODE_OTLP_HEADERS="Authorization=Basic <base64-instance-id:api-key>"
 ```
 
 ### Claude Code dashboard compatibility

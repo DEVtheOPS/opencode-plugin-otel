@@ -1,7 +1,39 @@
 {
-  "name": "@devtheops/opencode-plugin-otel",
-  "version": "0.6.0",
+  "author": "DEVtheOPS",
+  "bugs": {
+    "url": "https://github.com/DEVtheOPS/opencode-plugin-otel/issues"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.2.23",
+    "@opencode-ai/sdk": "^1.2.23",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-logs-otlp-grpc": "^0.213.0",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.213.0",
+    "@opentelemetry/exporter-metrics-otlp-grpc": "^0.213.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.213.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.213.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.213.0",
+    "@opentelemetry/resources": "^2.6.0",
+    "@opentelemetry/sdk-logs": "^0.213.0",
+    "@opentelemetry/sdk-metrics": "^2.6.0",
+    "@opentelemetry/sdk-trace-base": "^2.6.0",
+    "@opentelemetry/semantic-conventions": "^1.40.0",
+    "typescript": "^5.9.3"
+  },
   "description": "OpenTelemetry telemetry plugin for opencode CLI",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@typescript-eslint/parser": "^8.30.1",
+    "eslint": "^9.24.0",
+    "eslint-plugin-jsdoc": "^50.6.11"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src/"
+  ],
+  "homepage": "https://github.com/DEVtheOPS/opencode-plugin-otel#readme",
   "keywords": [
     "opentelemetry",
     "otel",
@@ -11,46 +43,22 @@
     "observability"
   ],
   "license": "MPL-2.0",
-  "author": "DEVtheOPS",
-  "homepage": "https://github.com/DEVtheOPS/opencode-plugin-otel#readme",
-  "bugs": {
-    "url": "https://github.com/DEVtheOPS/opencode-plugin-otel/issues"
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "name": "@devtheops/opencode-plugin-otel",
+  "publishConfig": {
+    "access": "public"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/DEVtheOPS/opencode-plugin-otel.git"
   },
-  "type": "module",
-  "main": "src/index.ts",
-  "module": "src/index.ts",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "files": [
-    "src/"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
+    "check:jsdoc-coverage": "bun scripts/check-jsdoc-coverage.mjs",
+    "lint": "bun --bun eslint .",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "@opencode-ai/plugin": "^1.2.23",
-    "@opencode-ai/sdk": "^1.2.23",
-    "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/exporter-logs-otlp-grpc": "^0.213.0",
-    "@opentelemetry/exporter-metrics-otlp-grpc": "^0.213.0",
-    "@opentelemetry/exporter-trace-otlp-grpc": "^0.213.0",
-    "@opentelemetry/resources": "^2.6.0",
-    "@opentelemetry/sdk-logs": "^0.213.0",
-    "@opentelemetry/sdk-metrics": "^2.6.0",
-    "@opentelemetry/sdk-trace-base": "^2.6.0",
-    "@opentelemetry/semantic-conventions": "^1.40.0",
-    "typescript": "^5.9.3"
-  },
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
+  "type": "module",
+  "version": "0.6.0",
   "oc-plugin": ["server"]
 }
