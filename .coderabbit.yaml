@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+
+reviews:
+  profile: chill
+  high_level_summary: true
+  review_status: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/*.lock"
+    - "!dist/**"
+    - "!coverage/**"
+    - "!**/*.snap"
+  pre_merge_checks:
+    docstrings:
+      mode: warning
+      threshold: 80
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+
+chat:
+  auto_reply: true

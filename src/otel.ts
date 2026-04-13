@@ -6,6 +6,9 @@ import { BasicTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trac
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-grpc"
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-grpc"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc"
+import { OTLPLogExporter as OTLPHttpLogExporter } from "@opentelemetry/exporter-logs-otlp-http"
+import { OTLPMetricExporter as OTLPHttpMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http"
+import { OTLPTraceExporter as OTLPHttpTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { resourceFromAttributes } from "@opentelemetry/resources"
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions"
 import { ATTR_HOST_ARCH } from "@opentelemetry/semantic-conventions/incubating"
@@ -44,24 +47,41 @@ export type OtelProviders = {
   tracerProvider: BasicTracerProvider
 }
 
+export function buildHttpSignalUrl(endpoint: string, signal: "traces" | "metrics" | "logs") {
+  const url = new URL(endpoint)
+  const normalizedPath = url.pathname.endsWith("/") ? url.pathname.slice(0, -1) : url.pathname
+  url.pathname = `${normalizedPath}/v1/${signal}`
+  return url.toString()
+}
+
 /**
  * Initialises the OTel SDK — creates a `MeterProvider`, `LoggerProvider`, and
- * `BasicTracerProvider` backed by OTLP/gRPC exporters pointed at `endpoint`, and
- * registers them as the global providers.
+ * `BasicTracerProvider` backed by OTLP exporters (gRPC or HTTP/protobuf)
+ * pointed at `endpoint`, and registers them as the global providers.
  */
 export function setupOtel(
   endpoint: string,
+  protocol: "grpc" | "http/protobuf",
   metricsInterval: number,
   logsInterval: number,
   version: string,
 ): OtelProviders {
   const resource = buildResource(version)
+  const metricExporter = protocol === "http/protobuf"
+    ? new OTLPHttpMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics") })
+    : new OTLPMetricExporter({ url: endpoint })
+  const logExporter = protocol === "http/protobuf"
+    ? new OTLPHttpLogExporter({ url: buildHttpSignalUrl(endpoint, "logs") })
+    : new OTLPLogExporter({ url: endpoint })
+  const traceExporter = protocol === "http/protobuf"
+    ? new OTLPHttpTraceExporter({ url: buildHttpSignalUrl(endpoint, "traces") })
+    : new OTLPTraceExporter({ url: endpoint })
 
   const meterProvider = new MeterProvider({
     resource,
     readers: [
       new PeriodicExportingMetricReader({
-        exporter: new OTLPMetricExporter({ url: endpoint }),
+        exporter: metricExporter,
         exportIntervalMillis: metricsInterval,
       }),
     ],
@@ -71,7 +91,7 @@ export function setupOtel(
   const loggerProvider = new LoggerProvider({
     resource,
     processors: [
-      new BatchLogRecordProcessor(new OTLPLogExporter({ url: endpoint }), {
+      new BatchLogRecordProcessor(logExporter, {
         scheduledDelayMillis: logsInterval,
       }),
     ],
@@ -80,7 +100,7 @@ export function setupOtel(
 
   const tracerProvider = new BasicTracerProvider({
     resource,
-    spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter({ url: endpoint }))],
+    spanProcessors: [new BatchSpanProcessor(traceExporter)],
   })
   trace.setGlobalTracerProvider(tracerProvider)
 

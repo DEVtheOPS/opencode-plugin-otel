@@ -44,6 +44,7 @@ describe("loadConfig", () => {
   const vars = [
     "OPENCODE_ENABLE_TELEMETRY",
     "OPENCODE_OTLP_ENDPOINT",
+    "OPENCODE_OTLP_PROTOCOL",
     "OPENCODE_OTLP_METRICS_INTERVAL",
     "OPENCODE_OTLP_LOGS_INTERVAL",
     "OPENCODE_OTLP_HEADERS",
@@ -60,6 +61,7 @@ describe("loadConfig", () => {
     const cfg = loadConfig()
     expect(cfg.enabled).toBe(false)
     expect(cfg.endpoint).toBe("http://localhost:4317")
+    expect(cfg.protocol).toBe("grpc")
     expect(cfg.metricsInterval).toBe(60000)
     expect(cfg.logsInterval).toBe(5000)
   })
@@ -72,6 +74,16 @@ describe("loadConfig", () => {
   test("reads custom endpoint", () => {
     process.env["OPENCODE_OTLP_ENDPOINT"] = "http://collector:4317"
     expect(loadConfig().endpoint).toBe("http://collector:4317")
+  })
+
+  test("reads HTTP/protobuf protocol", () => {
+    process.env["OPENCODE_OTLP_PROTOCOL"] = "http/protobuf"
+    expect(loadConfig().protocol).toBe("http/protobuf")
+  })
+
+  test("falls back to grpc for unknown protocol", () => {
+    process.env["OPENCODE_OTLP_PROTOCOL"] = "http"
+    expect(loadConfig().protocol).toBe("grpc")
   })
 
   test("reads custom intervals", () => {

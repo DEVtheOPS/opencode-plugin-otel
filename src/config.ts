@@ -4,6 +4,7 @@ import { LEVELS, type Level } from "./types.ts"
 export type PluginConfig = {
   enabled: boolean
   endpoint: string
+  protocol: "grpc" | "http/protobuf"
   metricsInterval: number
   logsInterval: number
   metricPrefix: string
@@ -31,6 +32,7 @@ export function parseEnvInt(key: string, fallback: number): number {
 export function loadConfig(): PluginConfig {
   const otlpHeaders = process.env["OPENCODE_OTLP_HEADERS"]
   const resourceAttributes = process.env["OPENCODE_RESOURCE_ATTRIBUTES"]
+  const protocol = process.env["OPENCODE_OTLP_PROTOCOL"]
 
   if (otlpHeaders) process.env["OTEL_EXPORTER_OTLP_HEADERS"] = otlpHeaders
   if (resourceAttributes) process.env["OTEL_RESOURCE_ATTRIBUTES"] = resourceAttributes
@@ -52,6 +54,7 @@ export function loadConfig(): PluginConfig {
   return {
     enabled: !!process.env["OPENCODE_ENABLE_TELEMETRY"],
     endpoint: process.env["OPENCODE_OTLP_ENDPOINT"] ?? "http://localhost:4317",
+    protocol: protocol === "http/protobuf" ? "http/protobuf" : "grpc",
     metricsInterval: parseEnvInt("OPENCODE_OTLP_METRICS_INTERVAL", 60000),
     logsInterval: parseEnvInt("OPENCODE_OTLP_LOGS_INTERVAL", 5000),
     metricPrefix: process.env["OPENCODE_METRIC_PREFIX"] ?? "opencode.",
