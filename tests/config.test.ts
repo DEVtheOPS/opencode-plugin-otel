@@ -49,10 +49,12 @@ describe("loadConfig", () => {
     "OPENCODE_OTLP_LOGS_INTERVAL",
     "OPENCODE_OTLP_HEADERS",
     "OPENCODE_RESOURCE_ATTRIBUTES",
+    "OPENCODE_OTLP_METRICS_TEMPORALITY",
     "OPENCODE_DISABLE_METRICS",
     "OPENCODE_DISABLE_TRACES",
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_RESOURCE_ATTRIBUTES",
+    "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
   ]
   beforeEach(() => vars.forEach((k) => delete process.env[k]))
   afterEach(() => vars.forEach((k) => delete process.env[k]))
@@ -118,6 +120,18 @@ describe("loadConfig", () => {
     delete process.env["OPENCODE_OTLP_HEADERS"]
     loadConfig()
     expect(process.env["OTEL_EXPORTER_OTLP_HEADERS"]).toBeUndefined()
+  })
+
+  test("copies OPENCODE_OTLP_METRICS_TEMPORALITY to OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE", () => {
+    process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"] = "delta"
+    loadConfig()
+    expect(process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]).toBe("delta")
+  })
+
+  test("does not set OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE when OPENCODE_OTLP_METRICS_TEMPORALITY is unset", () => {
+    delete process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"]
+    loadConfig()
+    expect(process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]).toBeUndefined()
   })
 
   test("does not overwrite pre-existing OTEL_* vars when OPENCODE_* vars are unset", () => {

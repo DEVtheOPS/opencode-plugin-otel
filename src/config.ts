@@ -25,17 +25,20 @@ export function parseEnvInt(key: string, fallback: number): number {
 
 /**
  * Reads all `OPENCODE_*` environment variables and returns the resolved plugin config.
- * Copies `OPENCODE_OTLP_HEADERS` → `OTEL_EXPORTER_OTLP_HEADERS` and
- * `OPENCODE_RESOURCE_ATTRIBUTES` → `OTEL_RESOURCE_ATTRIBUTES` so the OTel SDK
- * picks them up automatically when initialised.
+ * Copies `OPENCODE_OTLP_HEADERS` → `OTEL_EXPORTER_OTLP_HEADERS`,
+ * `OPENCODE_RESOURCE_ATTRIBUTES` → `OTEL_RESOURCE_ATTRIBUTES`, and
+ * `OPENCODE_OTLP_METRICS_TEMPORALITY` → `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`
+ * so the OTel SDK picks them up automatically when initialised.
  */
 export function loadConfig(): PluginConfig {
   const otlpHeaders = process.env["OPENCODE_OTLP_HEADERS"]
   const resourceAttributes = process.env["OPENCODE_RESOURCE_ATTRIBUTES"]
+  const metricsTemporality = process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"]
   const protocol = process.env["OPENCODE_OTLP_PROTOCOL"]
 
   if (otlpHeaders) process.env["OTEL_EXPORTER_OTLP_HEADERS"] = otlpHeaders
   if (resourceAttributes) process.env["OTEL_RESOURCE_ATTRIBUTES"] = resourceAttributes
+  if (metricsTemporality) process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = metricsTemporality
 
   const disabledMetrics = new Set(
     (process.env["OPENCODE_DISABLE_METRICS"] ?? "")
