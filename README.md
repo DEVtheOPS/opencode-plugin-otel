@@ -150,9 +150,17 @@ export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.tota
 
 ```bash
 export OPENCODE_ENABLE_TELEMETRY=1
-export OPENCODE_OTLP_ENDPOINT=https://api.datadoghq.com
+export OPENCODE_OTLP_ENDPOINT=https://otlp.datadoghq.com
 export OPENCODE_OTLP_PROTOCOL=http/protobuf
+export OPENCODE_OTLP_HEADERS="dd-api-key=YOUR_DATADOG_API_KEY"
+
+# Required — Datadog's OTLP intake only accepts delta temporality
+export OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta
 ```
+
+> **Note:** The endpoint is `otlp.datadoghq.com` (not `api.datadoghq.com`).
+> Use `otlp.datadoghq.eu` for EU, `otlp.us3.datadoghq.com` for US3, etc.
+> See [Datadog OTLP docs](https://docs.datadoghq.com/opentelemetry/interoperability/otlp_ingest_in_the_agent/) for all regions.
 
 ### Honeycomb example
 
