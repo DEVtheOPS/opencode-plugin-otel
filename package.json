@@ -5,8 +5,8 @@
   },
   "dependencies": {
     "@arizeai/openinference-semantic-conventions": "^2.2.0",
-    "@opencode-ai/plugin": "^1.2.23",
-    "@opencode-ai/sdk": "^1.2.23",
+    "@opencode-ai/plugin": "^1.14.20",
+    "@opencode-ai/sdk": "^1.14.20",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-logs-otlp-grpc": "^0.213.0",
     "@opentelemetry/exporter-logs-otlp-http": "^0.213.0",
@@ -47,6 +47,9 @@
   "main": "src/index.ts",
   "module": "src/index.ts",
   "name": "@devtheops/opencode-plugin-otel",
+  "oc-plugin": [
+    "server"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -60,8 +63,5 @@
     "typecheck": "tsc --noEmit"
   },
   "type": "module",
-  "version": "0.8.0",
-  "oc-plugin": [
-    "server"
-  ]
+  "version": "0.8.0"
 }
