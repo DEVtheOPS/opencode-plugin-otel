@@ -5,6 +5,7 @@
     "": {
       "name": "opencode-plugin-otel",
       "dependencies": {
+        "@arizeai/openinference-semantic-conventions": "^2.2.0",
         "@opencode-ai/plugin": "^1.2.23",
         "@opencode-ai/sdk": "^1.2.23",
         "@opentelemetry/api": "^1.9.0",
@@ -30,6 +31,8 @@
     },
   },
   "packages": {
+    "@arizeai/openinference-semantic-conventions": ["@arizeai/openinference-semantic-conventions@2.2.0", "", {}, "sha512-jyVeggDSuVFyOXWXqShKsRxHc5RrE7jRN2D0LGMGYDbo4oHeCJCgUezHQITT7t7FPNQxj5O+NcqERhznnDx6UQ=="],
+
     "@es-joy/jsdoccomment": ["@es-joy/jsdoccomment@0.50.2", "", { "dependencies": { "@types/estree": "^1.0.6", "@typescript-eslint/types": "^8.11.0", "comment-parser": "1.4.1", "esquery": "^1.6.0", "jsdoc-type-pratt-parser": "~4.1.0" } }, "sha512-YAdE/IJSpwbOTiaURNCKECdAwqrJuFiZhylmesBcIRawtYKnBR2wxPhoIewMg+Yu+QuYvHfJNReWpoxGBKOChA=="],
 
     "@eslint-community/eslint-utils": ["@eslint-community/eslint-utils@4.9.1", "", { "dependencies": { "eslint-visitor-keys": "^3.4.3" }, "peerDependencies": { "eslint": "^6.0.0 || ^7.0.0 || >=8.0.0" } }, "sha512-phrYmNiYppR7znFEdqgfWHXR6NCkZEK7hwWDHZUjit/2/U0r6XvkDl0SYnoM51Hq7FhCGdLDT6zxCCOY1hexsQ=="],

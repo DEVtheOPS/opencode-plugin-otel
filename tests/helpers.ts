@@ -187,6 +187,8 @@ export function makeCtx(projectID = "proj_test", disabledMetrics: string[] = [],
     tracePrefix: "opencode.",
     sessionSpans: new Map(),
     messageSpans: new Map(),
+    sessionInputs: new Map(),
+    messageOutputs: new Map(),
   }
 
   return {

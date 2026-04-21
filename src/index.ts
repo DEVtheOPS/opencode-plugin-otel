@@ -2,6 +2,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { logs } from "@opentelemetry/api-logs"
 import { trace } from "@opentelemetry/api"
+import { AGENT_NAME } from "@arizeai/openinference-semantic-conventions"
 import pkg from "../package.json" with { type: "json" }
 import type {
   EventSessionCreated,
@@ -86,6 +87,8 @@ export const OtelPlugin: Plugin = async ({ project, client }) => {
   const sessionTotals = new Map()
   const sessionSpans = new Map()
   const messageSpans = new Map()
+  const sessionInputs = new Map()
+  const messageOutputs = new Map()
   const { disabledMetrics, disabledTraces } = config
   const commonAttrs = { "project.id": project.id } as const
 
@@ -111,6 +114,8 @@ export const OtelPlugin: Plugin = async ({ project, client }) => {
     tracePrefix: config.metricPrefix,
     sessionSpans,
     messageSpans,
+    sessionInputs,
+    messageOutputs,
   }
 
   async function shutdown() {
@@ -153,10 +158,24 @@ export const OtelPlugin: Plugin = async ({ project, client }) => {
       const agent = input.agent ?? "unknown"
       const totals = sessionTotals.get(input.sessionID)
       if (totals) totals.agent = agent
-      const promptLength = output.parts.reduce(
-        (acc, p) => (p.type === "text" ? acc + p.text.length : acc),
-        0,
-      )
+      const sessionSpan = sessionSpans.get(input.sessionID)
+      if (sessionSpan) sessionSpan.setAttribute(AGENT_NAME, agent)
+      const promptText = output.parts.map((part) => {
+        switch (part.type) {
+          case "text":
+            return part.text
+          case "file":
+            return part.filename ?? part.url
+          case "agent":
+            return part.name
+          case "subtask":
+            return part.description
+          default:
+            return ""
+        }
+      }).filter(Boolean).join("\n")
+      sessionInputs.set(input.sessionID, promptText)
+      const promptLength = promptText.length
       logger.emit({
         severityNumber: SeverityNumber.INFO,
         severityText: "INFO",

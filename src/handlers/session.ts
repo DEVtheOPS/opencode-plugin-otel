@@ -1,8 +1,11 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { SpanStatusCode, context, trace } from "@opentelemetry/api"
 import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
+import { AGENT_NAME, OpenInferenceSpanKind, SemanticConventions, SESSION_ID } from "@arizeai/openinference-semantic-conventions"
 import { errorSummary, setBoundedMap, isMetricEnabled, isTraceEnabled } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
+
+const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 
 /** Increments the session counter, records start time, starts the root session span, and emits a `session.created` log event. */
 export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext) {
@@ -29,7 +32,9 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
       {
         startTime: createdAt,
         attributes: {
-          "session.id": sessionID,
+          [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.AGENT,
+          [SESSION_ID]: sessionID,
+          [AGENT_NAME]: "unknown",
           "session.is_subagent": isSubagent,
           ...ctx.commonAttrs,
         },
@@ -61,6 +66,7 @@ function sweepSession(sessionID: string, ctx: HandlerContext) {
       ctx.pendingToolSpans.delete(key)
     }
   }
+  ctx.sessionInputs.delete(sessionID)
   const msgPrefix = `${sessionID}:`
   for (const [key, span] of ctx.messageSpans) {
     if (key.startsWith(msgPrefix)) {
@@ -68,6 +74,9 @@ function sweepSession(sessionID: string, ctx: HandlerContext) {
       span.end()
       ctx.messageSpans.delete(key)
     }
+  }
+  for (const key of ctx.messageOutputs.keys()) {
+    if (key.startsWith(msgPrefix)) ctx.messageOutputs.delete(key)
   }
 }
 
@@ -98,6 +107,7 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
   if (sessionSpan) {
     if (totals) {
       sessionSpan.setAttributes({
+        [AGENT_NAME]: totals.agent,
         "session.total_tokens": totals.tokens,
         "session.total_cost_usd": totals.cost,
         "session.total_messages": totals.messages,
@@ -140,6 +150,8 @@ export function handleSessionError(e: EventSessionError, ctx: HandlerContext) {
   if (rawID) {
     const sessionSpan = ctx.sessionSpans.get(rawID)
     if (sessionSpan) {
+      const totals = ctx.sessionTotals.get(rawID)
+      if (totals) sessionSpan.setAttribute(AGENT_NAME, totals.agent)
       sessionSpan.setStatus({ code: SpanStatusCode.ERROR, message: error })
       sessionSpan.setAttribute("error", error)
       sessionSpan.end()

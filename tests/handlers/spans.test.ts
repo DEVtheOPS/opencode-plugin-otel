@@ -1,5 +1,20 @@
 import { describe, test, expect } from "bun:test"
 import { SpanStatusCode } from "@opentelemetry/api"
+import {
+  AGENT_NAME,
+  LLM_MODEL_NAME,
+  LLM_PROVIDER,
+  LLM_SYSTEM,
+  LLM_TOKEN_COUNT_COMPLETION,
+  LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING,
+  LLM_TOKEN_COUNT_PROMPT,
+  LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ,
+  LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE,
+  OpenInferenceSpanKind,
+  SemanticConventions,
+  SESSION_ID,
+  TOOL_NAME,
+} from "@arizeai/openinference-semantic-conventions"
 import type { Span } from "@opentelemetry/api"
 import { handleSessionCreated, handleSessionIdle, handleSessionError } from "../../src/handlers/session.ts"
 import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "../../src/handlers/message.ts"
@@ -11,6 +26,8 @@ import type {
   EventMessageUpdated,
   EventMessagePartUpdated,
 } from "@opencode-ai/sdk"
+
+const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 
 function makeSessionCreated(sessionID: string, createdAt = 1000, parentID?: string): EventSessionCreated {
   return {
@@ -92,6 +109,14 @@ describe("session spans", () => {
     const { ctx, tracer } = makeCtx()
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     expect(tracer.spans[0]!.attributes["session.id"]).toBe("ses_1")
+    expect(tracer.spans[0]!.attributes[SESSION_ID]).toBe("ses_1")
+  })
+
+  test("session span is tagged as an OpenInference agent span", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    expect(tracer.spans[0]!.attributes[OPENINFERENCE_SPAN_KIND]).toBe(OpenInferenceSpanKind.AGENT)
+    expect(tracer.spans[0]!.attributes[AGENT_NAME]).toBe("unknown")
   })
 
   test("session span carries is_subagent=false for root session", () => {
@@ -188,6 +213,8 @@ describe("tool spans", () => {
     const { ctx, tracer } = makeCtx()
     handleMessagePartUpdated(makeToolPartUpdated("running", { tool: "read_file" }), ctx)
     expect(tracer.spans[0]!.attributes["tool.name"]).toBe("read_file")
+    expect(tracer.spans[0]!.attributes[TOOL_NAME]).toBe("read_file")
+    expect(tracer.spans[0]!.attributes[OPENINFERENCE_SPAN_KIND]).toBe(OpenInferenceSpanKind.TOOL)
   })
 
   test("ends tool span with OK status on completion", () => {
@@ -260,19 +287,21 @@ describe("tool spans", () => {
 })
 
 describe("message (LLM) spans", () => {
-  test("startMessageSpan creates a gen_ai.chat span", () => {
+  test("startMessageSpan creates an llm span", () => {
     const { ctx, tracer } = makeCtx()
     startMessageSpan("ses_1", "msg_1", "claude-3-5-sonnet", "anthropic", 1000, ctx)
     expect(tracer.spans).toHaveLength(1)
-    expect(tracer.spans[0]!.name).toBe("gen_ai.chat")
+    expect(tracer.spans[0]!.name).toBe("opencode.llm")
     expect(ctx.messageSpans.has("ses_1:msg_1")).toBe(true)
   })
 
-  test("startMessageSpan sets gen_ai.* attributes", () => {
+  test("startMessageSpan sets OpenInference LLM attributes", () => {
     const { ctx, tracer } = makeCtx()
     startMessageSpan("ses_1", "msg_1", "gpt-4o", "openai", 1000, ctx)
-    expect(tracer.spans[0]!.attributes["gen_ai.system"]).toBe("openai")
-    expect(tracer.spans[0]!.attributes["gen_ai.request.model"]).toBe("gpt-4o")
+    expect(tracer.spans[0]!.attributes[OPENINFERENCE_SPAN_KIND]).toBe(OpenInferenceSpanKind.LLM)
+    expect(tracer.spans[0]!.attributes[LLM_SYSTEM]).toBe("openai")
+    expect(tracer.spans[0]!.attributes[LLM_PROVIDER]).toBe("openai")
+    expect(tracer.spans[0]!.attributes[LLM_MODEL_NAME]).toBe("gpt-4o")
   })
 
   test("startMessageSpan is a no-op when span already exists for sessionID:messageID", () => {
@@ -307,7 +336,7 @@ describe("message (LLM) spans", () => {
     expect(tracer.spans[0]!.status.message).toBe("RateLimitError")
   })
 
-  test("handleMessageUpdated sets gen_ai.usage token attributes on span", () => {
+  test("handleMessageUpdated sets OpenInference token attributes on span", () => {
     const { ctx, tracer } = makeCtx()
     startMessageSpan("ses_1", "msg_1", "claude-3-5-sonnet", "anthropic", 1000, ctx)
     handleMessageUpdated(
@@ -318,11 +347,11 @@ describe("message (LLM) spans", () => {
       ctx,
     )
     const span = tracer.spans[0]!
-    expect(span.attributes["gen_ai.usage.input_tokens"]).toBe(200)
-    expect(span.attributes["gen_ai.usage.output_tokens"]).toBe(80)
-    expect(span.attributes["gen_ai.usage.reasoning_tokens"]).toBe(10)
-    expect(span.attributes["gen_ai.usage.cache_read_tokens"]).toBe(30)
-    expect(span.attributes["gen_ai.usage.cache_creation_tokens"]).toBe(5)
+    expect(span.attributes[LLM_TOKEN_COUNT_PROMPT]).toBe(200)
+    expect(span.attributes[LLM_TOKEN_COUNT_COMPLETION]).toBe(80)
+    expect(span.attributes[LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING]).toBe(10)
+    expect(span.attributes[LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ]).toBe(30)
+    expect(span.attributes[LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE]).toBe(5)
   })
 
   test("handleMessageUpdated no-ops span handling when no span exists for messageID", () => {
@@ -339,7 +368,7 @@ describe("message (LLM) spans", () => {
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     startMessageSpan("ses_1", "msg_1", "claude", "anthropic", 1000, ctx)
     expect(tracer.spans).toHaveLength(2)
-    expect(tracer.spans[1]!.name).toBe("gen_ai.chat")
+    expect(tracer.spans[1]!.name).toBe("opencode.llm")
     expect(tracer.spans[1]!.parentSpan).toBe(tracer.spans[0])
   })
 })
@@ -384,7 +413,7 @@ describe("orphaned span cleanup", () => {
     startMessageSpan("ses_1", "msg_orphan", "claude", "anthropic", 1000, ctx)
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     expect(ctx.messageSpans.has("ses_1:msg_orphan")).toBe(false)
-    const msgSpan = tracer.spans.find(s => s.name === "gen_ai.chat")!
+    const msgSpan = tracer.spans.find(s => s.name === "opencode.llm")!
     expect(msgSpan.ended).toBe(true)
     expect(msgSpan.status.code).toBe(SpanStatusCode.ERROR)
   })
@@ -395,7 +424,7 @@ describe("orphaned span cleanup", () => {
     startMessageSpan("ses_1", "msg_orphan", "claude", "anthropic", 1000, ctx)
     handleSessionError(makeSessionError("ses_1"), ctx)
     expect(ctx.messageSpans.has("ses_1:msg_orphan")).toBe(false)
-    const msgSpan = tracer.spans.find(s => s.name === "gen_ai.chat")!
+    const msgSpan = tracer.spans.find(s => s.name === "opencode.llm")!
     expect(msgSpan.ended).toBe(true)
     expect(msgSpan.status.code).toBe(SpanStatusCode.ERROR)
   })
@@ -438,7 +467,7 @@ describe("OPENCODE_DISABLE_TRACES=session", () => {
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     startMessageSpan("ses_1", "msg_1", "claude", "anthropic", 1000, ctx)
     expect(tracer.spans).toHaveLength(1)
-    expect(tracer.spans[0]!.name).toBe("gen_ai.chat")
+    expect(tracer.spans[0]!.name).toBe("opencode.llm")
   })
 })
 

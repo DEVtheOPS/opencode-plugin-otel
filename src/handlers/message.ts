@@ -1,8 +1,37 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { SpanStatusCode, SpanKind, context, trace } from "@opentelemetry/api"
 import type { AssistantMessage, EventMessageUpdated, EventMessagePartUpdated, ToolPart } from "@opencode-ai/sdk"
+import {
+  AGENT_NAME,
+  INPUT_MIME_TYPE,
+  INPUT_VALUE,
+  LLM_COST_TOTAL,
+  LLM_INPUT_MESSAGES,
+  LLM_MODEL_NAME,
+  LLM_OUTPUT_MESSAGES,
+  LLM_PROVIDER,
+  LLM_SYSTEM,
+  LLM_TOKEN_COUNT_COMPLETION,
+  LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING,
+  LLM_TOKEN_COUNT_PROMPT,
+  LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ,
+  LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE,
+  LLM_TOKEN_COUNT_TOTAL,
+  MimeType,
+  OpenInferenceSpanKind,
+  OUTPUT_MIME_TYPE,
+  OUTPUT_VALUE,
+  SemanticConventions,
+  SESSION_ID,
+  TOOL_ID,
+  TOOL_NAME,
+  TOOL_PARAMETERS,
+} from "@arizeai/openinference-semantic-conventions"
 import { errorSummary, setBoundedMap, accumulateSessionTotals, isMetricEnabled, isTraceEnabled } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
+
+const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
+const LLM_FINISH_REASON = "llm.finish_reason"
 
 type SubtaskPart = {
   type: "subtask"
@@ -79,13 +108,23 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
   const msgKey = `${sessionID}:${assistant.id}`
   const msgSpan = ctx.messageSpans.get(msgKey)
   if (msgSpan) {
+    const outputText = ctx.messageOutputs.get(msgKey)
     msgSpan.setAttributes({
-      "gen_ai.usage.input_tokens": assistant.tokens.input,
-      "gen_ai.usage.output_tokens": assistant.tokens.output,
-      "gen_ai.usage.reasoning_tokens": assistant.tokens.reasoning,
-      "gen_ai.usage.cache_read_tokens": assistant.tokens.cache.read,
-      "gen_ai.usage.cache_creation_tokens": assistant.tokens.cache.write,
-      "gen_ai.response.finish_reason": assistant.error ? "error" : "stop",
+      [LLM_TOKEN_COUNT_PROMPT]: assistant.tokens.input,
+      [LLM_TOKEN_COUNT_COMPLETION]: assistant.tokens.output,
+      [LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING]: assistant.tokens.reasoning,
+      [LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ]: assistant.tokens.cache.read,
+      [LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE]: assistant.tokens.cache.write,
+      [LLM_TOKEN_COUNT_TOTAL]: totalTokens,
+      [LLM_FINISH_REASON]: assistant.error ? "error" : (assistant.finish ?? "stop"),
+      [LLM_COST_TOTAL]: assistant.cost,
+      ...(outputText
+        ? {
+            [OUTPUT_VALUE]: outputText,
+            [OUTPUT_MIME_TYPE]: MimeType.TEXT,
+            [LLM_OUTPUT_MESSAGES]: JSON.stringify([{ role: "assistant", content: outputText }]),
+          }
+        : {}),
       cost_usd: assistant.cost,
       duration_ms: duration,
     })
@@ -96,6 +135,7 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
     }
     msgSpan.end(assistant.time.completed)
     ctx.messageSpans.delete(msgKey)
+    ctx.messageOutputs.delete(msgKey)
   }
 
   if (assistant.error) {
@@ -171,6 +211,12 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
 export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: HandlerContext) {
   const part = e.properties.part
 
+  if (part.type === "text") {
+    const key = `${part.sessionID}:${part.messageID}`
+    ctx.messageOutputs.set(key, `${ctx.messageOutputs.get(key) ?? ""}${part.text}`)
+    return
+  }
+
   if (part.type === "subtask") {
     const subtask = part as unknown as SubtaskPart
     if (isMetricEnabled("subtask.count", ctx)) {
@@ -219,8 +265,13 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
                 startTime: toolPart.state.time.start,
                 kind: SpanKind.INTERNAL,
                 attributes: {
-                  "session.id": toolPart.sessionID,
-                  "tool.name": toolPart.tool,
+                  [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.TOOL,
+                  [SESSION_ID]: toolPart.sessionID,
+                  [TOOL_ID]: toolPart.callID,
+                  [TOOL_NAME]: toolPart.tool,
+                  [TOOL_PARAMETERS]: JSON.stringify(toolPart.state.input),
+                  [INPUT_VALUE]: JSON.stringify(toolPart.state.input),
+                  [INPUT_MIME_TYPE]: MimeType.JSON,
                   ...ctx.commonAttrs,
                 },
               },
@@ -269,8 +320,13 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
             startTime: start,
             kind: SpanKind.INTERNAL,
             attributes: {
-              "session.id": toolPart.sessionID,
-              "tool.name": toolPart.tool,
+              [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.TOOL,
+              [SESSION_ID]: toolPart.sessionID,
+              [TOOL_ID]: toolPart.callID,
+              [TOOL_NAME]: toolPart.tool,
+              [TOOL_PARAMETERS]: JSON.stringify(toolPart.state.input),
+              [INPUT_VALUE]: JSON.stringify(toolPart.state.input),
+              [INPUT_MIME_TYPE]: MimeType.JSON,
               ...ctx.commonAttrs,
             },
           },
@@ -280,10 +336,18 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
       toolSpan.setAttribute("tool.success", success)
       if (success) {
         const output = (toolPart.state as { output: string }).output
+        toolSpan.setAttributes({
+          [OUTPUT_VALUE]: output,
+          [OUTPUT_MIME_TYPE]: MimeType.TEXT,
+        })
         toolSpan.setAttribute("tool.result_size_bytes", Buffer.byteLength(output, "utf8"))
         toolSpan.setStatus({ code: SpanStatusCode.OK })
       } else {
         const err = (toolPart.state as { error: string }).error
+        toolSpan.setAttributes({
+          [OUTPUT_VALUE]: err,
+          [OUTPUT_MIME_TYPE]: MimeType.TEXT,
+        })
         toolSpan.setAttribute("tool.error", err)
         toolSpan.setStatus({ code: SpanStatusCode.ERROR, message: err })
       }
@@ -349,14 +413,24 @@ export function startMessageSpan(
     : context.active()
 
   const msgSpan = ctx.tracer.startSpan(
-    "gen_ai.chat",
+    `${ctx.tracePrefix}llm`,
     {
       startTime,
       kind: SpanKind.CLIENT,
       attributes: {
-        "gen_ai.system": providerID,
-        "gen_ai.request.model": modelID,
-        "session.id": sessionID,
+        [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.LLM,
+        [SESSION_ID]: sessionID,
+        [AGENT_NAME]: ctx.sessionTotals.get(sessionID)?.agent ?? "unknown",
+        [LLM_SYSTEM]: providerID,
+        [LLM_PROVIDER]: providerID,
+        [LLM_MODEL_NAME]: modelID,
+        ...(ctx.sessionInputs.has(sessionID)
+          ? {
+              [INPUT_VALUE]: ctx.sessionInputs.get(sessionID)!,
+              [INPUT_MIME_TYPE]: MimeType.TEXT,
+              [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: ctx.sessionInputs.get(sessionID)! }]),
+            }
+          : {}),
         ...ctx.commonAttrs,
       },
     },

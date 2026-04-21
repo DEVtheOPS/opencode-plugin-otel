@@ -77,4 +77,6 @@ export type HandlerContext = {
   tracePrefix: string
   sessionSpans: Map<string, Span>
   messageSpans: Map<string, Span>
+  sessionInputs: Map<string, string>
+  messageOutputs: Map<string, string>
 }
