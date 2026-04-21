@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.8.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.7.0...v0.8.0) (2026-04-21)
+
+
+### Features
+
+* **traces:** align spans with OpenInference semantics ([ce6ca28](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/ce6ca28100ab65eb6e28ce8842c5d0f641e6bd59))
+
 ## [0.7.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v0.6.0...v0.7.0) (2026-04-13)
 
 
