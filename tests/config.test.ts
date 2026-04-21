@@ -124,14 +124,39 @@ describe("loadConfig", () => {
 
   test("copies OPENCODE_OTLP_METRICS_TEMPORALITY to OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE", () => {
     process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"] = "delta"
-    loadConfig()
+    const cfg = loadConfig()
     expect(process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]).toBe("delta")
+    expect(cfg.metricsTemporality).toBe("delta")
   })
 
   test("does not set OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE when OPENCODE_OTLP_METRICS_TEMPORALITY is unset", () => {
     delete process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"]
-    loadConfig()
+    const cfg = loadConfig()
     expect(process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]).toBeUndefined()
+    expect(cfg.metricsTemporality).toBeUndefined()
+  })
+
+  test("normalizes OPENCODE_OTLP_METRICS_TEMPORALITY to lowercase", () => {
+    process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"] = "Delta"
+    const cfg = loadConfig()
+    expect(process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]).toBe("delta")
+    expect(cfg.metricsTemporality).toBe("delta")
+  })
+
+  test("ignores invalid OPENCODE_OTLP_METRICS_TEMPORALITY and warns", () => {
+    const warnings: string[] = []
+    const origWarn = console.warn
+    console.warn = (...args: unknown[]) => warnings.push(String(args[0]))
+    try {
+      process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"] = "bogus"
+      const cfg = loadConfig()
+      expect(process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]).toBeUndefined()
+      expect(cfg.metricsTemporality).toBeUndefined()
+      expect(warnings.length).toBe(1)
+      expect(warnings[0]).toContain("bogus")
+    } finally {
+      console.warn = origWarn
+    }
   })
 
   test("does not overwrite pre-existing OTEL_* vars when OPENCODE_* vars are unset", () => {

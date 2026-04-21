@@ -10,6 +10,7 @@ export type PluginConfig = {
   metricPrefix: string
   otlpHeaders: string | undefined
   resourceAttributes: string | undefined
+  metricsTemporality: string | undefined
   disabledMetrics: Set<string>
   disabledTraces: Set<string>
 }
@@ -33,12 +34,26 @@ export function parseEnvInt(key: string, fallback: number): number {
 export function loadConfig(): PluginConfig {
   const otlpHeaders = process.env["OPENCODE_OTLP_HEADERS"]
   const resourceAttributes = process.env["OPENCODE_RESOURCE_ATTRIBUTES"]
-  const metricsTemporality = process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"]
+  const rawTemporality = process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"]
   const protocol = process.env["OPENCODE_OTLP_PROTOCOL"]
+
+  const validTemporalities = new Set(["cumulative", "delta", "lowmemory"])
+  let metricsTemporality: string | undefined
+  if (rawTemporality) {
+    const normalized = rawTemporality.toLowerCase()
+    if (validTemporalities.has(normalized)) {
+      metricsTemporality = normalized
+      process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = normalized
+    } else {
+      console.warn(
+        `[opencode-plugin-otel] Invalid OPENCODE_OTLP_METRICS_TEMPORALITY="${rawTemporality}". ` +
+          `Expected one of: cumulative, delta, lowmemory. Value ignored.`,
+      )
+    }
+  }
 
   if (otlpHeaders) process.env["OTEL_EXPORTER_OTLP_HEADERS"] = otlpHeaders
   if (resourceAttributes) process.env["OTEL_RESOURCE_ATTRIBUTES"] = resourceAttributes
-  if (metricsTemporality) process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = metricsTemporality
 
   const disabledMetrics = new Set(
     (process.env["OPENCODE_DISABLE_METRICS"] ?? "")
@@ -63,6 +78,7 @@ export function loadConfig(): PluginConfig {
     metricPrefix: process.env["OPENCODE_METRIC_PREFIX"] ?? "opencode.",
     otlpHeaders,
     resourceAttributes,
+    metricsTemporality,
     disabledMetrics,
     disabledTraces,
   }
