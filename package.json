@@ -70,7 +70,7 @@
     "check:jsdoc-coverage": "bun scripts/check-jsdoc-coverage.mjs",
     "lint": "bun --bun eslint .",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run build"
+    "prepack": "bun run build"
   },
   "type": "module",
   "version": "0.8.0"
