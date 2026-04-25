@@ -29,10 +29,17 @@
     "eslint-plugin-jsdoc": "^50.6.11"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
-    "src/"
+    "dist/"
   ],
   "homepage": "https://github.com/DEVtheOPS/opencode-plugin-otel#readme",
   "keywords": [
@@ -44,8 +51,9 @@
     "observability"
   ],
   "license": "MPL-2.0",
-  "main": "src/index.ts",
-  "module": "src/index.ts",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
   "name": "@devtheops/opencode-plugin-otel",
   "oc-plugin": [
     "server"
@@ -58,9 +66,11 @@
     "url": "https://github.com/DEVtheOPS/opencode-plugin-otel.git"
   },
   "scripts": {
+    "build": "bun build src/index.ts --outdir=./dist --target=node && tsc -p tsconfig.build.json",
     "check:jsdoc-coverage": "bun scripts/check-jsdoc-coverage.mjs",
     "lint": "bun --bun eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepack": "bun run build"
   },
   "type": "module",
   "version": "0.8.0"
