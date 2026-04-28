@@ -49,10 +49,12 @@ describe("loadConfig", () => {
     "OPENCODE_OTLP_LOGS_INTERVAL",
     "OPENCODE_OTLP_HEADERS",
     "OPENCODE_RESOURCE_ATTRIBUTES",
+    "OPENCODE_OTLP_METRICS_TEMPORALITY",
     "OPENCODE_DISABLE_METRICS",
     "OPENCODE_DISABLE_TRACES",
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_RESOURCE_ATTRIBUTES",
+    "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
   ]
   beforeEach(() => vars.forEach((k) => delete process.env[k]))
   afterEach(() => vars.forEach((k) => delete process.env[k]))
@@ -118,6 +120,43 @@ describe("loadConfig", () => {
     delete process.env["OPENCODE_OTLP_HEADERS"]
     loadConfig()
     expect(process.env["OTEL_EXPORTER_OTLP_HEADERS"]).toBeUndefined()
+  })
+
+  test("copies OPENCODE_OTLP_METRICS_TEMPORALITY to OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE", () => {
+    process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"] = "delta"
+    const cfg = loadConfig()
+    expect(process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]).toBe("delta")
+    expect(cfg.metricsTemporality).toBe("delta")
+  })
+
+  test("does not set OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE when OPENCODE_OTLP_METRICS_TEMPORALITY is unset", () => {
+    delete process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"]
+    const cfg = loadConfig()
+    expect(process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]).toBeUndefined()
+    expect(cfg.metricsTemporality).toBeUndefined()
+  })
+
+  test("normalizes OPENCODE_OTLP_METRICS_TEMPORALITY to lowercase", () => {
+    process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"] = "Delta"
+    const cfg = loadConfig()
+    expect(process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]).toBe("delta")
+    expect(cfg.metricsTemporality).toBe("delta")
+  })
+
+  test("ignores invalid OPENCODE_OTLP_METRICS_TEMPORALITY and warns", () => {
+    const warnings: string[] = []
+    const origWarn = console.warn
+    console.warn = (...args: unknown[]) => warnings.push(String(args[0]))
+    try {
+      process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"] = "bogus"
+      const cfg = loadConfig()
+      expect(process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]).toBeUndefined()
+      expect(cfg.metricsTemporality).toBeUndefined()
+      expect(warnings.length).toBe(1)
+      expect(warnings[0]).toContain("bogus")
+    } finally {
+      console.warn = origWarn
+    }
   })
 
   test("does not overwrite pre-existing OTEL_* vars when OPENCODE_* vars are unset", () => {

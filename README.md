@@ -90,6 +90,7 @@ All configuration is via environment variables. Set them in your shell profile (
 | `OPENCODE_DISABLE_METRICS` | _(unset)_ | Comma-separated list of metric name suffixes to disable (e.g. `cache.count,session.duration`) |
 | `OPENCODE_OTLP_HEADERS` | _(unset)_ | Comma-separated `key=value` headers added to all OTLP exports. **Keep out of version control — may contain sensitive auth tokens.** |
 | `OPENCODE_RESOURCE_ATTRIBUTES` | _(unset)_ | Comma-separated `key=value` pairs merged into the OTel resource. Example: `service.version=1.2.3,deployment.environment=production` |
+| `OPENCODE_OTLP_METRICS_TEMPORALITY` | _(unset)_ | Metrics aggregation temporality: `delta`, `cumulative`, or `lowmemory`. Required for Datadog (`delta`). Copied to `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`. |
 
 ### Quick start
 
@@ -150,9 +151,17 @@ export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.tota
 
 ```bash
 export OPENCODE_ENABLE_TELEMETRY=1
-export OPENCODE_OTLP_ENDPOINT=https://api.datadoghq.com
+export OPENCODE_OTLP_ENDPOINT=https://otlp.datadoghq.com
 export OPENCODE_OTLP_PROTOCOL=http/protobuf
+export OPENCODE_OTLP_HEADERS="dd-api-key=YOUR_DATADOG_API_KEY"
+
+# Required — Datadog's OTLP intake only accepts delta temporality
+export OPENCODE_OTLP_METRICS_TEMPORALITY=delta
 ```
+
+> **Note:** The endpoint is `otlp.datadoghq.com` (not `api.datadoghq.com`).
+> Use `otlp.datadoghq.eu` for EU, `otlp.us3.datadoghq.com` for US3, etc.
+> See [Datadog OTLP docs](https://docs.datadoghq.com/opentelemetry/setup/otlp_ingest_in_the_agent/) for all regions.
 
 ### Honeycomb example
 

@@ -1,5 +1,10 @@
 import { LEVELS, type Level } from "./types.ts"
 
+/** Accepted values for `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`. */
+export type MetricsTemporality = "cumulative" | "delta" | "lowmemory"
+
+const VALID_TEMPORALITIES: ReadonlySet<MetricsTemporality> = new Set<MetricsTemporality>(["cumulative", "delta", "lowmemory"])
+
 /** Configuration values resolved from `OPENCODE_*` environment variables. */
 export type PluginConfig = {
   enabled: boolean
@@ -10,6 +15,7 @@ export type PluginConfig = {
   metricPrefix: string
   otlpHeaders: string | undefined
   resourceAttributes: string | undefined
+  metricsTemporality: MetricsTemporality | undefined
   disabledMetrics: Set<string>
   disabledTraces: Set<string>
 }
@@ -25,14 +31,30 @@ export function parseEnvInt(key: string, fallback: number): number {
 
 /**
  * Reads all `OPENCODE_*` environment variables and returns the resolved plugin config.
- * Copies `OPENCODE_OTLP_HEADERS` → `OTEL_EXPORTER_OTLP_HEADERS` and
- * `OPENCODE_RESOURCE_ATTRIBUTES` → `OTEL_RESOURCE_ATTRIBUTES` so the OTel SDK
- * picks them up automatically when initialised.
+ * Copies `OPENCODE_OTLP_HEADERS` → `OTEL_EXPORTER_OTLP_HEADERS`,
+ * `OPENCODE_RESOURCE_ATTRIBUTES` → `OTEL_RESOURCE_ATTRIBUTES`, and
+ * `OPENCODE_OTLP_METRICS_TEMPORALITY` → `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`
+ * so the OTel SDK picks them up automatically when initialised.
  */
 export function loadConfig(): PluginConfig {
   const otlpHeaders = process.env["OPENCODE_OTLP_HEADERS"]
   const resourceAttributes = process.env["OPENCODE_RESOURCE_ATTRIBUTES"]
+  const rawTemporality = process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"]
   const protocol = process.env["OPENCODE_OTLP_PROTOCOL"]
+
+  let metricsTemporality: MetricsTemporality | undefined
+  if (rawTemporality) {
+    const normalized = rawTemporality.toLowerCase()
+    if (VALID_TEMPORALITIES.has(normalized as MetricsTemporality)) {
+      metricsTemporality = normalized as MetricsTemporality
+      process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = normalized
+    } else {
+      console.warn(
+        `[opencode-plugin-otel] Invalid OPENCODE_OTLP_METRICS_TEMPORALITY="${rawTemporality}". ` +
+          `Expected one of: cumulative, delta, lowmemory. Value ignored.`,
+      )
+    }
+  }
 
   if (otlpHeaders) process.env["OTEL_EXPORTER_OTLP_HEADERS"] = otlpHeaders
   if (resourceAttributes) process.env["OTEL_RESOURCE_ATTRIBUTES"] = resourceAttributes
@@ -60,6 +82,7 @@ export function loadConfig(): PluginConfig {
     metricPrefix: process.env["OPENCODE_METRIC_PREFIX"] ?? "opencode.",
     otlpHeaders,
     resourceAttributes,
+    metricsTemporality,
     disabledMetrics,
     disabledTraces,
   }
