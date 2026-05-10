@@ -1,5 +1,5 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
-import { ROOT_CONTEXT, SpanStatusCode, trace } from "@opentelemetry/api"
+import { ROOT_CONTEXT, SpanStatusCode } from "@opentelemetry/api"
 import type {
   EventSessionCreated,
   EventSessionIdle,
@@ -16,21 +16,16 @@ import {
   SemanticConventions,
   SESSION_ID,
 } from "@arizeai/openinference-semantic-conventions"
-import { errorSummary, setBoundedMap, isMetricEnabled, isTraceEnabled } from "../util.ts"
+import {
+  errorSummary,
+  setBoundedMap,
+  isMetricEnabled,
+  isTraceEnabled,
+  resolveSessionTraceContext,
+} from "../util.ts"
 import type { HandlerContext } from "../types.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
-
-export function resolveSessionTraceContext(sessionID: string, ctx: HandlerContext) {
-  const parentContext = ctx.parentContext ?? ROOT_CONTEXT
-  const sessionSpan = ctx.sessionSpans.get(sessionID)
-  if (sessionSpan) return trace.setSpan(parentContext, sessionSpan)
-  const spanContext = ctx.sessionSpanContexts.get(sessionID)
-  if (spanContext) return trace.setSpanContext(parentContext, spanContext)
-  const runRootID = ctx.sessionRunRoots.get(sessionID)
-  const runSpanContext = runRootID ? ctx.runSpanContexts.get(runRootID) : undefined
-  return runSpanContext ? trace.setSpanContext(parentContext, runSpanContext) : undefined
-}
 
 export function handleRunStarted(
   sessionID: string,

@@ -38,9 +38,9 @@ import {
   accumulateSessionTotals,
   isMetricEnabled,
   isTraceEnabled,
+  resolveSessionTraceContext,
 } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
-import { resolveSessionTraceContext } from "./session.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 const LLM_FINISH_REASON = "llm.finish_reason"
