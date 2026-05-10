@@ -26,6 +26,7 @@ import { LEVELS, type Level, type HandlerContext } from "./types.ts"
 import { loadConfig, resolveHelperPath, resolveLogLevel } from "./config.ts"
 import { probeEndpoint } from "./probe.ts"
 import { setupOtel, createInstruments } from "./otel.ts"
+import { setBoundedMap } from "./util.ts"
 import {
   handleSessionCreated,
   handleSessionIdle,
@@ -210,9 +211,15 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
 
     "chat.message": safe("chat.message", async (input, output) => {
       const handlerCtx = withParentContext()
+      const startTime = Date.now()
       const agent = input.agent ?? "unknown"
-      const totals = sessionTotals.get(input.sessionID)
-      if (totals) totals.agent = agent
+      setBoundedMap(sessionTotals, input.sessionID, {
+        startMs: startTime,
+        tokens: 0,
+        cost: 0,
+        messages: 0,
+        agent,
+      })
       const promptText = output.parts
         .map((part) => {
           switch (part.type) {
@@ -246,14 +253,14 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
           model,
         })
       } else {
-        handleRunStarted(input.sessionID, agent, promptText, model, Date.now(), handlerCtx)
+        handleRunStarted(input.sessionID, agent, promptText, model, startTime, handlerCtx)
       }
       const promptLength = promptText.length
       logger.emit({
         severityNumber: SeverityNumber.INFO,
         severityText: "INFO",
-        timestamp: Date.now(),
-        observedTimestamp: Date.now(),
+        timestamp: startTime,
+        observedTimestamp: startTime,
         body: "user_prompt",
         attributes: {
           "event.name": "user_prompt",

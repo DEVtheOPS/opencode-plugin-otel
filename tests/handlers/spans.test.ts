@@ -638,7 +638,7 @@ describe("OPENCODE_DISABLE_TRACES=llm", () => {
     ).not.toThrow()
   })
 
-  test("session.created does not start a span when only llm disabled", () => {
+  test("session.created does not start a span when session tracing remains run-anchored and only llm is disabled", () => {
     const { ctx, tracer } = makeCtx("proj_test", [], ["llm"])
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     expect(tracer.spans).toHaveLength(0)
@@ -681,7 +681,7 @@ describe("OPENCODE_DISABLE_TRACES=tool", () => {
     expect(tracer.spans).toHaveLength(0)
   })
 
-  test("session.created does not start a span when only tool disabled", () => {
+  test("session.created does not start a span when session tracing remains run-anchored and only tool is disabled", () => {
     const { ctx, tracer } = makeCtx("proj_test", [], ["tool"])
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     expect(tracer.spans).toHaveLength(0)
