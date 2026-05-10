@@ -2,7 +2,6 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { logs } from "@opentelemetry/api-logs"
 import { trace } from "@opentelemetry/api"
-import { AGENT_NAME } from "@arizeai/openinference-semantic-conventions"
 import pkg from "../package.json" with { type: "json" }
 import type {
   EventSessionCreated,
@@ -20,8 +19,18 @@ import { LEVELS, type Level, type HandlerContext } from "./types.ts"
 import { loadConfig, resolveHelperPath, resolveLogLevel } from "./config.ts"
 import { probeEndpoint } from "./probe.ts"
 import { setupOtel, createInstruments } from "./otel.ts"
-import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus } from "./handlers/session.ts"
-import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "./handlers/message.ts"
+import {
+  handleSessionCreated,
+  handleSessionIdle,
+  handleSessionError,
+  handleSessionStatus,
+  handleRunStarted,
+} from "./handlers/session.ts"
+import {
+  handleMessageUpdated,
+  handleMessagePartUpdated,
+  startMessageSpan,
+} from "./handlers/message.ts"
 import { handlePermissionUpdated, handlePermissionReplied } from "./handlers/permission.ts"
 import { handleSessionDiff, handleCommandExecuted } from "./handlers/activity.ts"
 
@@ -39,7 +48,9 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
 
   const log: HandlerContext["log"] = async (level, message, extra) => {
     if (LEVELS[level] < LEVELS[minLevel]) return
-    await client.app.log({ body: { service: "opencode-plugin-otel", level, message, extra } })
+    await client.app.log({
+      body: { service: "opencode-plugin-otel", level, message, extra },
+    })
   }
 
   if (!config.enabled) {
@@ -65,7 +76,10 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
 
   const probe = await probeEndpoint(config.endpoint)
   if (probe.ok) {
-    await log("info", "OTLP endpoint reachable", { endpoint: config.endpoint, ms: probe.ms })
+    await log("info", "OTLP endpoint reachable", {
+      endpoint: config.endpoint,
+      ms: probe.ms,
+    })
   } else {
     await log("warn", "OTLP endpoint unreachable — exports may fail", {
       endpoint: config.endpoint,
@@ -90,7 +104,11 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
   const pendingToolSpans = new Map()
   const pendingPermissions = new Map()
   const sessionTotals = new Map()
+  const runSpans = new Map()
+  const runSpanContexts = new Map()
+  const sessionRunRoots = new Map()
   const sessionSpans = new Map()
+  const sessionSpanContexts = new Map()
   const messageSpans = new Map()
   const sessionInputs = new Map()
   const messageOutputs = new Map()
@@ -117,24 +135,43 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     disabledTraces,
     tracer,
     tracePrefix: config.metricPrefix,
+    runSpans,
+    runSpanContexts,
+    sessionRunRoots,
     sessionSpans,
+    sessionSpanContexts,
     messageSpans,
     sessionInputs,
     messageOutputs,
   }
 
   async function shutdown() {
-    await Promise.allSettled([meterProvider.shutdown(), loggerProvider.shutdown(), tracerProvider.shutdown()])
+    await Promise.allSettled([
+      meterProvider.shutdown(),
+      loggerProvider.shutdown(),
+      tracerProvider.shutdown(),
+    ])
   }
 
-  process.on("SIGTERM", () => { shutdown().then(() => process.exit(0)).catch(() => process.exit(1)) })
-  process.on("SIGINT",  () => { shutdown().then(() => process.exit(0)).catch(() => process.exit(1)) })
-  process.on("beforeExit", () => { shutdown().catch(() => {}) })
+  process.on("SIGTERM", () => {
+    shutdown()
+      .then(() => process.exit(0))
+      .catch(() => process.exit(1))
+  })
+  process.on("SIGINT", () => {
+    shutdown()
+      .then(() => process.exit(0))
+      .catch(() => process.exit(1))
+  })
+  process.on("beforeExit", () => {
+    shutdown().catch(() => {})
+  })
 
-  const safe = <T extends unknown[]>(
-    name: string,
-    fn: (...args: T) => Promise<void> | void,
-  ): ((...args: T) => Promise<void>) =>
+  const safe =
+    <T extends unknown[]>(
+      name: string,
+      fn: (...args: T) => Promise<void> | void,
+    ): ((...args: T) => Promise<void>) =>
     async (...args: T) => {
       try {
         await fn(...args)
@@ -163,23 +200,32 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
       const agent = input.agent ?? "unknown"
       const totals = sessionTotals.get(input.sessionID)
       if (totals) totals.agent = agent
-      const sessionSpan = sessionSpans.get(input.sessionID)
-      if (sessionSpan) sessionSpan.setAttribute(AGENT_NAME, agent)
-      const promptText = output.parts.map((part) => {
-        switch (part.type) {
-          case "text":
-            return part.text
-          case "file":
-            return part.filename ?? part.url
-          case "agent":
-            return part.name
-          case "subtask":
-            return part.description
-          default:
-            return ""
-        }
-      }).filter(Boolean).join("\n")
+      const promptText = output.parts
+        .map((part) => {
+          switch (part.type) {
+            case "text":
+              return part.text
+            case "file":
+              return part.filename ?? part.url
+            case "agent":
+              return part.name
+            case "subtask":
+              return part.description
+            default:
+              return ""
+          }
+        })
+        .filter(Boolean)
+        .join("\n")
       sessionInputs.set(input.sessionID, promptText)
+      handleRunStarted(
+        input.sessionID,
+        agent,
+        promptText,
+        input.model ? `${input.model.providerID}/${input.model.modelID}` : "unknown",
+        Date.now(),
+        ctx,
+      )
       const promptLength = promptText.length
       logger.emit({
         severityNumber: SeverityNumber.INFO,
@@ -192,9 +238,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
           "session.id": input.sessionID,
           agent,
           prompt_length: promptLength,
-          model: input.model
-            ? `${input.model.providerID}/${input.model.modelID}`
-            : "unknown",
+          model: input.model ? `${input.model.providerID}/${input.model.modelID}` : "unknown",
           ...commonAttrs,
         },
       })

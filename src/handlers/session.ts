@@ -1,11 +1,82 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { SpanStatusCode, context, trace } from "@opentelemetry/api"
-import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
-import { AGENT_NAME, OpenInferenceSpanKind, SemanticConventions, SESSION_ID } from "@arizeai/openinference-semantic-conventions"
+import type {
+  EventSessionCreated,
+  EventSessionIdle,
+  EventSessionError,
+  EventSessionStatus,
+} from "@opencode-ai/sdk"
+import {
+  AGENT_NAME,
+  INPUT_MIME_TYPE,
+  INPUT_VALUE,
+  LLM_INPUT_MESSAGES,
+  MimeType,
+  OpenInferenceSpanKind,
+  SemanticConventions,
+  SESSION_ID,
+} from "@arizeai/openinference-semantic-conventions"
 import { errorSummary, setBoundedMap, isMetricEnabled, isTraceEnabled } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
+
+export function resolveSessionTraceContext(sessionID: string, ctx: HandlerContext) {
+  const sessionSpan = ctx.sessionSpans.get(sessionID)
+  if (sessionSpan) return trace.setSpan(context.active(), sessionSpan)
+  const spanContext = ctx.sessionSpanContexts.get(sessionID)
+  if (spanContext) return trace.setSpanContext(context.active(), spanContext)
+  const runRootID = ctx.sessionRunRoots.get(sessionID)
+  const runSpanContext = runRootID ? ctx.runSpanContexts.get(runRootID) : undefined
+  return runSpanContext ? trace.setSpanContext(context.active(), runSpanContext) : undefined
+}
+
+export function handleRunStarted(
+  sessionID: string,
+  agent: string,
+  promptText: string,
+  model: string,
+  startTime: number,
+  ctx: HandlerContext,
+) {
+  if (!isTraceEnabled("session", ctx)) return
+  const existing = ctx.runSpans.get(sessionID)
+  if (existing) {
+    existing.setAttributes({
+      [AGENT_NAME]: agent,
+      ...(promptText
+        ? {
+            [INPUT_VALUE]: promptText,
+            [INPUT_MIME_TYPE]: MimeType.TEXT,
+            [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
+          }
+        : {}),
+      model,
+    })
+    return
+  }
+  const runSpan = ctx.tracer.startSpan(`${ctx.tracePrefix}session`, {
+    startTime,
+    attributes: {
+      [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.AGENT,
+      [SESSION_ID]: sessionID,
+      [AGENT_NAME]: agent,
+      "session.is_subagent": false,
+      ...(promptText
+        ? {
+            [INPUT_VALUE]: promptText,
+            [INPUT_MIME_TYPE]: MimeType.TEXT,
+            [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
+          }
+        : {}),
+      model,
+      ...ctx.commonAttrs,
+    },
+  })
+  setBoundedMap(ctx.runSpans, sessionID, runSpan)
+  setBoundedMap(ctx.runSpanContexts, sessionID, runSpan.spanContext())
+  setBoundedMap(ctx.sessionRunRoots, sessionID, sessionID)
+}
 
 /** Increments the session counter, records start time, starts the root session span, and emits a `session.created` log event. */
 export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext) {
@@ -13,19 +84,28 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
   const createdAt = time.created
   const isSubagent = !!parentID
   if (isMetricEnabled("session.count", ctx)) {
-    ctx.instruments.sessionCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, is_subagent: isSubagent })
+    ctx.instruments.sessionCounter.add(1, {
+      ...ctx.commonAttrs,
+      "session.id": sessionID,
+      is_subagent: isSubagent,
+    })
   }
-  setBoundedMap(ctx.sessionTotals, sessionID, { startMs: createdAt, tokens: 0, cost: 0, messages: 0, agent: "unknown" })
+  setBoundedMap(ctx.sessionTotals, sessionID, {
+    startMs: createdAt,
+    tokens: 0,
+    cost: 0,
+    messages: 0,
+    agent: "unknown",
+  })
 
   // WARNING: disabling "session" traces while "llm" or "tool" traces remain enabled
   // will cause those child spans to be emitted as unlinked root spans with no parent.
   // There is no session span to parent them to. If you need a connected trace hierarchy,
   // either enable all three trace types or disable all of them together.
-  if (isTraceEnabled("session", ctx)) {
-    const parentSpan = parentID ? ctx.sessionSpans.get(parentID) : undefined
-    const spanCtx = parentSpan
-      ? trace.setSpan(context.active(), parentSpan)
-      : context.active()
+  if (isTraceEnabled("session", ctx) && parentID) {
+    const parentRunRoot = ctx.sessionRunRoots.get(parentID)
+    if (parentRunRoot) setBoundedMap(ctx.sessionRunRoots, sessionID, parentRunRoot)
+    const spanCtx = resolveSessionTraceContext(parentID, ctx)
 
     const sessionSpan = ctx.tracer.startSpan(
       `${ctx.tracePrefix}session`,
@@ -39,9 +119,16 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
           ...ctx.commonAttrs,
         },
       },
-      spanCtx,
+      spanCtx ?? context.active(),
     )
     setBoundedMap(ctx.sessionSpans, sessionID, sessionSpan)
+    setBoundedMap(ctx.sessionSpanContexts, sessionID, sessionSpan.spanContext())
+    if (parentID && !spanCtx) {
+      void ctx.log("warn", "otel: missing parent session trace context; starting new root trace", {
+        sessionID,
+        parentID,
+      })
+    }
   }
 
   ctx.logger.emit({
@@ -50,9 +137,18 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
     timestamp: createdAt,
     observedTimestamp: Date.now(),
     body: "session.created",
-    attributes: { "event.name": "session.created", "session.id": sessionID, is_subagent: isSubagent, ...ctx.commonAttrs },
+    attributes: {
+      "event.name": "session.created",
+      "session.id": sessionID,
+      is_subagent: isSubagent,
+      ...ctx.commonAttrs,
+    },
   })
-  return ctx.log("info", "otel: session.created", { sessionID, createdAt, isSubagent })
+  return ctx.log("info", "otel: session.created", {
+    sessionID,
+    createdAt,
+    isSubagent,
+  })
 }
 
 function sweepSession(sessionID: string, ctx: HandlerContext) {
@@ -61,7 +157,10 @@ function sweepSession(sessionID: string, ctx: HandlerContext) {
   }
   for (const [key, span] of ctx.pendingToolSpans) {
     if (span.sessionID === sessionID) {
-      span.span?.setStatus({ code: SpanStatusCode.ERROR, message: "session ended before tool completed" })
+      span.span?.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: "session ended before tool completed",
+      })
       span.span?.end()
       ctx.pendingToolSpans.delete(key)
     }
@@ -70,7 +169,10 @@ function sweepSession(sessionID: string, ctx: HandlerContext) {
   const msgPrefix = `${sessionID}:`
   for (const [key, span] of ctx.messageSpans) {
     if (key.startsWith(msgPrefix)) {
-      span.setStatus({ code: SpanStatusCode.ERROR, message: "session ended before message completed" })
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: "session ended before message completed",
+      })
       span.end()
       ctx.messageSpans.delete(key)
     }
@@ -117,6 +219,21 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
     sessionSpan.end()
     ctx.sessionSpans.delete(sessionID)
   }
+  ctx.sessionSpanContexts.delete(sessionID)
+  const runSpan = ctx.runSpans.get(sessionID)
+  if (runSpan) {
+    if (totals) {
+      runSpan.setAttributes({
+        [AGENT_NAME]: totals.agent,
+        "session.total_tokens": totals.tokens,
+        "session.total_cost_usd": totals.cost,
+        "session.total_messages": totals.messages,
+      })
+    }
+    runSpan.setStatus({ code: SpanStatusCode.OK })
+    runSpan.end()
+    ctx.runSpans.delete(sessionID)
+  }
 
   ctx.logger.emit({
     severityNumber: SeverityNumber.INFO,
@@ -135,7 +252,14 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
   })
   ctx.log("debug", "otel: session.idle", {
     sessionID,
-    ...(totals ? { duration_ms, total_tokens: totals.tokens, total_cost_usd: totals.cost, total_messages: totals.messages } : {}),
+    ...(totals
+      ? {
+          duration_ms,
+          total_tokens: totals.tokens,
+          total_cost_usd: totals.cost,
+          total_messages: totals.messages,
+        }
+      : {}),
   })
 }
 
@@ -144,18 +268,27 @@ export function handleSessionError(e: EventSessionError, ctx: HandlerContext) {
   const rawID = e.properties.sessionID
   const sessionID = rawID ?? "unknown"
   const error = errorSummary(e.properties.error)
+  const totals = rawID ? ctx.sessionTotals.get(rawID) : undefined
   if (rawID) ctx.sessionTotals.delete(rawID)
   sweepSession(sessionID, ctx)
 
   if (rawID) {
     const sessionSpan = ctx.sessionSpans.get(rawID)
     if (sessionSpan) {
-      const totals = ctx.sessionTotals.get(rawID)
       if (totals) sessionSpan.setAttribute(AGENT_NAME, totals.agent)
       sessionSpan.setStatus({ code: SpanStatusCode.ERROR, message: error })
       sessionSpan.setAttribute("error", error)
       sessionSpan.end()
       ctx.sessionSpans.delete(rawID)
+    }
+    ctx.sessionSpanContexts.delete(rawID)
+    const runSpan = ctx.runSpans.get(rawID)
+    if (runSpan) {
+      if (totals) runSpan.setAttribute(AGENT_NAME, totals.agent)
+      runSpan.setStatus({ code: SpanStatusCode.ERROR, message: error })
+      runSpan.setAttribute("error", error)
+      runSpan.end()
+      ctx.runSpans.delete(rawID)
     }
   }
 
@@ -181,7 +314,14 @@ export function handleSessionStatus(e: EventSessionStatus, ctx: HandlerContext) 
   const { sessionID, status } = e.properties
   const { attempt, message: retryMessage } = status
   if (isMetricEnabled("retry.count", ctx)) {
-    ctx.instruments.retryCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID })
-    ctx.log("debug", "otel: retry counter incremented", { sessionID, attempt, retryMessage })
+    ctx.instruments.retryCounter.add(1, {
+      ...ctx.commonAttrs,
+      "session.id": sessionID,
+    })
+    ctx.log("debug", "otel: retry counter incremented", {
+      sessionID,
+      attempt,
+      retryMessage,
+    })
   }
 }

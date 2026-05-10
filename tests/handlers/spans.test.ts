@@ -16,8 +16,17 @@ import {
   TOOL_NAME,
 } from "@arizeai/openinference-semantic-conventions"
 import type { Span } from "@opentelemetry/api"
-import { handleSessionCreated, handleSessionIdle, handleSessionError } from "../../src/handlers/session.ts"
-import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "../../src/handlers/message.ts"
+import {
+  handleSessionCreated,
+  handleSessionIdle,
+  handleSessionError,
+  handleRunStarted,
+} from "../../src/handlers/session.ts"
+import {
+  handleMessageUpdated,
+  handleMessagePartUpdated,
+  startMessageSpan,
+} from "../../src/handlers/message.ts"
 import { makeCtx, makeTracer, type SpySpan } from "../helpers.ts"
 import type {
   EventSessionCreated,
@@ -29,15 +38,30 @@ import type {
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 
-function makeSessionCreated(sessionID: string, createdAt = 1000, parentID?: string): EventSessionCreated {
+function makeSessionCreated(
+  sessionID: string,
+  createdAt = 1000,
+  parentID?: string,
+): EventSessionCreated {
   return {
     type: "session.created",
-    properties: { info: { id: sessionID, projectID: "proj_test", directory: "/tmp", parentID, time: { created: createdAt } } },
+    properties: {
+      info: {
+        id: sessionID,
+        projectID: "proj_test",
+        directory: "/tmp",
+        parentID,
+        time: { created: createdAt },
+      },
+    },
   } as unknown as EventSessionCreated
 }
 
 function makeSessionIdle(sessionID: string): EventSessionIdle {
-  return { type: "session.idle", properties: { sessionID } } as EventSessionIdle
+  return {
+    type: "session.idle",
+    properties: { sessionID },
+  } as EventSessionIdle
 }
 
 function makeSessionError(sessionID?: string, error?: { name: string }): EventSessionError {
@@ -53,7 +77,12 @@ function makeAssistantMessageUpdated(overrides: {
   modelID?: string
   providerID?: string
   cost?: number
-  tokens?: { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: { read: number; write: number }
+  }
   time?: { created: number; completed?: number }
   error?: { name: string }
 }): EventMessageUpdated {
@@ -67,7 +96,12 @@ function makeAssistantMessageUpdated(overrides: {
         modelID: overrides.modelID ?? "claude-3-5-sonnet",
         providerID: overrides.providerID ?? "anthropic",
         cost: overrides.cost ?? 0.01,
-        tokens: overrides.tokens ?? { input: 100, output: 50, reasoning: 0, cache: { read: 0, write: 0 } },
+        tokens: overrides.tokens ?? {
+          input: 100,
+          output: 50,
+          reasoning: 0,
+          cache: { read: 0, write: 0 },
+        },
         time: overrides.time ?? { created: 1000, completed: 2000 },
         error: overrides.error,
       },
@@ -77,7 +111,14 @@ function makeAssistantMessageUpdated(overrides: {
 
 function makeToolPartUpdated(
   status: "running" | "completed" | "error",
-  overrides: { sessionID?: string; callID?: string; tool?: string; startMs?: number; endMs?: number; output?: string } = {},
+  overrides: {
+    sessionID?: string
+    callID?: string
+    tool?: string
+    startMs?: number
+    endMs?: number
+    output?: string
+  } = {},
 ): EventMessagePartUpdated {
   const sessionID = overrides.sessionID ?? "ses_1"
   const callID = overrides.callID ?? "call_1"
@@ -87,41 +128,51 @@ function makeToolPartUpdated(
     status === "running"
       ? { status: "running", time: { start } }
       : status === "completed"
-        ? { status: "completed", time: { start, end }, output: overrides.output ?? "ok" }
+        ? {
+            status: "completed",
+            time: { start, end },
+            output: overrides.output ?? "ok",
+          }
         : { status: "error", time: { start, end }, error: "fail" }
   return {
     type: "message.part.updated",
-    properties: { part: { type: "tool", sessionID, callID, tool: overrides.tool ?? "bash", state } },
+    properties: {
+      part: {
+        type: "tool",
+        sessionID,
+        callID,
+        tool: overrides.tool ?? "bash",
+        state,
+      },
+    },
   } as unknown as EventMessagePartUpdated
 }
 
 describe("session spans", () => {
-  test("starts a session span on session.created", () => {
+  test("does not start a top-level session span on session.created", () => {
     const { ctx, tracer } = makeCtx()
     handleSessionCreated(makeSessionCreated("ses_1", 5000), ctx)
-    expect(tracer.spans).toHaveLength(1)
-    expect(tracer.spans[0]!.name).toBe("opencode.session")
-    expect(tracer.spans[0]!.startTime).toBe(5000)
-    expect(ctx.sessionSpans.has("ses_1")).toBe(true)
+    expect(tracer.spans).toHaveLength(0)
+    expect(ctx.sessionSpans.has("ses_1")).toBe(false)
   })
 
-  test("session span carries session.id attribute", () => {
+  test("run span carries session.id attribute", () => {
     const { ctx, tracer } = makeCtx()
-    handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
     expect(tracer.spans[0]!.attributes["session.id"]).toBe("ses_1")
     expect(tracer.spans[0]!.attributes[SESSION_ID]).toBe("ses_1")
   })
 
-  test("session span is tagged as an OpenInference agent span", () => {
+  test("run span is tagged as an OpenInference agent span", () => {
     const { ctx, tracer } = makeCtx()
-    handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
     expect(tracer.spans[0]!.attributes[OPENINFERENCE_SPAN_KIND]).toBe(OpenInferenceSpanKind.AGENT)
-    expect(tracer.spans[0]!.attributes[AGENT_NAME]).toBe("unknown")
+    expect(tracer.spans[0]!.attributes[AGENT_NAME]).toBe("agent")
   })
 
-  test("session span carries is_subagent=false for root session", () => {
+  test("run span carries is_subagent=false for root session", () => {
     const { ctx, tracer } = makeCtx()
-    handleSessionCreated(makeSessionCreated("ses_root"), ctx)
+    handleRunStarted("ses_root", "agent", "prompt", "anthropic/claude", 1000, ctx)
     expect(tracer.spans[0]!.attributes["session.is_subagent"]).toBe(false)
   })
 
@@ -134,6 +185,7 @@ describe("session spans", () => {
   test("ends session span with OK status on session.idle", () => {
     const { ctx, tracer } = makeCtx()
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     const span = tracer.spans[0]!
     expect(span.ended).toBe(true)
@@ -144,7 +196,14 @@ describe("session spans", () => {
   test("sets session total attributes before ending on idle", () => {
     const { ctx, tracer } = makeCtx()
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 100, tokens: 250, cost: 0.05, messages: 3, agent: "build" })
+    handleRunStarted("ses_1", "build", "prompt", "anthropic/claude", 1000, ctx)
+    ctx.sessionTotals.set("ses_1", {
+      startMs: Date.now() - 100,
+      tokens: 250,
+      cost: 0.05,
+      messages: 3,
+      agent: "build",
+    })
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     const span = tracer.spans[0]!
     expect(span.attributes["session.total_tokens"]).toBe(250)
@@ -155,6 +214,7 @@ describe("session spans", () => {
   test("ends session span with ERROR status on session.error", () => {
     const { ctx, tracer } = makeCtx()
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
     handleSessionError(makeSessionError("ses_1", { name: "NetworkError" }), ctx)
     const span = tracer.spans[0]!
     expect(span.ended).toBe(true)
@@ -165,6 +225,7 @@ describe("session spans", () => {
   test("error message is propagated to session span status", () => {
     const { ctx, tracer } = makeCtx()
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
     handleSessionError(makeSessionError("ses_1", { name: "TimeoutError" }), ctx)
     expect(tracer.spans[0]!.status.message).toBe("TimeoutError")
   })
@@ -178,24 +239,54 @@ describe("session spans", () => {
   test("session.error with undefined sessionID does not end any span", () => {
     const { ctx, tracer } = makeCtx()
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
     handleSessionError(makeSessionError(undefined, { name: "UnknownError" }), ctx)
-    expect(ctx.sessionSpans.has("ses_1")).toBe(true)
+    expect(ctx.runSpans.has("ses_1")).toBe(true)
     expect(tracer.spans[0]!.ended).toBe(false)
   })
 
   test("subagent span — parent session span is in sessionSpans before child is created", () => {
     const { ctx, tracer } = makeCtx()
+    handleRunStarted("ses_parent", "agent", "prompt", "anthropic/claude", 1000, ctx)
     handleSessionCreated(makeSessionCreated("ses_parent"), ctx)
     handleSessionCreated(makeSessionCreated("ses_child", 2000, "ses_parent"), ctx)
     expect(tracer.spans).toHaveLength(2)
     expect(tracer.spans[1]!.name).toBe("opencode.session")
-    expect(tracer.spans[1]!.parentSpan).toBe(tracer.spans[0])
+    expect(tracer.spans[1]!.parentSpan).toBeUndefined()
+    expect(tracer.spans[1]!.parentSpanContext?.spanId).toBe(tracer.spans[0]!.spanContext().spanId)
   })
 
   test("subagent span — no error when parent session span is absent", () => {
     const { ctx, tracer } = makeCtx()
-    expect(() => handleSessionCreated(makeSessionCreated("ses_child", 1000, "ses_missing_parent"), ctx)).not.toThrow()
+    expect(() =>
+      handleSessionCreated(makeSessionCreated("ses_child", 1000, "ses_missing_parent"), ctx),
+    ).not.toThrow()
     expect(tracer.spans).toHaveLength(1)
+  })
+
+  test("subagent span stays in parent trace after parent session span has ended", () => {
+    const { ctx, tracer } = makeCtx()
+    handleRunStarted("ses_parent", "agent", "prompt", "anthropic/claude", 1000, ctx)
+    handleSessionCreated(makeSessionCreated("ses_parent"), ctx)
+    const parentSpan = tracer.spans[0]!
+    handleSessionIdle(makeSessionIdle("ses_parent"), ctx)
+    handleSessionCreated(makeSessionCreated("ses_child", 2000, "ses_parent"), ctx)
+    const childSpan = tracer.spans[1]!
+    expect(childSpan.parentSpan).toBeUndefined()
+    expect(childSpan.parentSpanContext?.spanId).toBe(parentSpan.spanContext().spanId)
+    expect(childSpan.spanContext().traceId).toBe(parentSpan.spanContext().traceId)
+  })
+
+  test("starting a new run on the same session creates a new trace", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleRunStarted("ses_1", "agent", "prompt 1", "anthropic/claude", 1000, ctx)
+    const firstTraceId = tracer.spans[0]!.spanContext().traceId
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    handleSessionCreated(makeSessionCreated("ses_1", 2000), ctx)
+    handleRunStarted("ses_1", "agent", "prompt 2", "anthropic/claude", 3000, ctx)
+    const secondTraceId = tracer.spans[1]!.spanContext().traceId
+    expect(secondTraceId).not.toBe(firstTraceId)
   })
 })
 
@@ -269,20 +360,53 @@ describe("tool spans", () => {
 
   test("tool span is parented to session span when available", () => {
     const { ctx, tracer } = makeCtx()
+    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     handleMessagePartUpdated(makeToolPartUpdated("running", { sessionID: "ses_1" }), ctx)
-    expect(tracer.spans).toHaveLength(2)
-    expect(tracer.spans[1]!.name).toBe("opencode.tool.bash")
-    expect(tracer.spans[1]!.parentSpan).toBe(tracer.spans[0])
+    expect(tracer.spans.at(-1)!.name).toBe("opencode.tool.bash")
+    expect(tracer.spans.at(-1)!.parentSpan).toBeUndefined()
+    expect(tracer.spans.at(-1)!.parentSpanContext?.spanId).toBe(
+      tracer.spans[0]!.spanContext().spanId,
+    )
   })
 
   test("out-of-order tool span is parented to session span when available", () => {
     const { ctx, tracer } = makeCtx()
+    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    handleMessagePartUpdated(makeToolPartUpdated("completed", { sessionID: "ses_1", startMs: 500, endMs: 1500 }), ctx)
-    expect(tracer.spans).toHaveLength(2)
-    expect(tracer.spans[1]!.name).toBe("opencode.tool.bash")
-    expect(tracer.spans[1]!.parentSpan).toBe(tracer.spans[0])
+    handleMessagePartUpdated(
+      makeToolPartUpdated("completed", {
+        sessionID: "ses_1",
+        startMs: 500,
+        endMs: 1500,
+      }),
+      ctx,
+    )
+    expect(tracer.spans.at(-1)!.name).toBe("opencode.tool.bash")
+    expect(tracer.spans.at(-1)!.parentSpan).toBeUndefined()
+    expect(tracer.spans.at(-1)!.parentSpanContext?.spanId).toBe(
+      tracer.spans[0]!.spanContext().spanId,
+    )
+  })
+
+  test("out-of-order tool span keeps session trace after live session span has ended", () => {
+    const { ctx, tracer } = makeCtx()
+    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
+    handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    const runSpan = tracer.spans[0]!
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    handleMessagePartUpdated(
+      makeToolPartUpdated("completed", {
+        sessionID: "ses_1",
+        startMs: 500,
+        endMs: 1500,
+      }),
+      ctx,
+    )
+    const toolSpan = tracer.spans[1]!
+    expect(toolSpan.parentSpan).toBeUndefined()
+    expect(toolSpan.parentSpanContext?.spanId).toBe(runSpan.spanContext().spanId)
+    expect(toolSpan.spanContext().traceId).toBe(runSpan.spanContext().traceId)
   })
 })
 
@@ -314,7 +438,13 @@ describe("message (LLM) spans", () => {
   test("handleMessageUpdated ends message span on completion", () => {
     const { ctx, tracer } = makeCtx()
     startMessageSpan("ses_1", "msg_1", "claude-3-5-sonnet", "anthropic", 1000, ctx)
-    handleMessageUpdated(makeAssistantMessageUpdated({ id: "msg_1", time: { created: 1000, completed: 2000 } }), ctx)
+    handleMessageUpdated(
+      makeAssistantMessageUpdated({
+        id: "msg_1",
+        time: { created: 1000, completed: 2000 },
+      }),
+      ctx,
+    )
     const span = tracer.spans[0]!
     expect(span.ended).toBe(true)
     expect(span.endTime).toBe(2000)
@@ -331,7 +461,13 @@ describe("message (LLM) spans", () => {
   test("handleMessageUpdated sets ERROR status on api error", () => {
     const { ctx, tracer } = makeCtx()
     startMessageSpan("ses_1", "msg_1", "claude-3-5-sonnet", "anthropic", 1000, ctx)
-    handleMessageUpdated(makeAssistantMessageUpdated({ id: "msg_1", error: { name: "RateLimitError" } }), ctx)
+    handleMessageUpdated(
+      makeAssistantMessageUpdated({
+        id: "msg_1",
+        error: { name: "RateLimitError" },
+      }),
+      ctx,
+    )
     expect(tracer.spans[0]!.status.code).toBe(SpanStatusCode.ERROR)
     expect(tracer.spans[0]!.status.message).toBe("RateLimitError")
   })
@@ -342,7 +478,12 @@ describe("message (LLM) spans", () => {
     handleMessageUpdated(
       makeAssistantMessageUpdated({
         id: "msg_1",
-        tokens: { input: 200, output: 80, reasoning: 10, cache: { read: 30, write: 5 } },
+        tokens: {
+          input: 200,
+          output: 80,
+          reasoning: 10,
+          cache: { read: 30, write: 5 },
+        },
       }),
       ctx,
     )
@@ -365,11 +506,27 @@ describe("message (LLM) spans", () => {
 
   test("message span is parented to session span when available", () => {
     const { ctx, tracer } = makeCtx()
+    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     startMessageSpan("ses_1", "msg_1", "claude", "anthropic", 1000, ctx)
-    expect(tracer.spans).toHaveLength(2)
-    expect(tracer.spans[1]!.name).toBe("opencode.llm")
-    expect(tracer.spans[1]!.parentSpan).toBe(tracer.spans[0])
+    expect(tracer.spans.at(-1)!.name).toBe("opencode.llm")
+    expect(tracer.spans.at(-1)!.parentSpan).toBeUndefined()
+    expect(tracer.spans.at(-1)!.parentSpanContext?.spanId).toBe(
+      tracer.spans[0]!.spanContext().spanId,
+    )
+  })
+
+  test("message span keeps session trace after live session span has ended", () => {
+    const { ctx, tracer } = makeCtx()
+    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
+    handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    const runSpan = tracer.spans[0]!
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    startMessageSpan("ses_1", "msg_1", "claude", "anthropic", 1000, ctx)
+    const msgSpan = tracer.spans[1]!
+    expect(msgSpan.parentSpan).toBeUndefined()
+    expect(msgSpan.parentSpanContext?.spanId).toBe(runSpan.spanContext().spanId)
+    expect(msgSpan.spanContext().traceId).toBe(runSpan.spanContext().traceId)
   })
 })
 
@@ -381,7 +538,7 @@ describe("orphaned span cleanup", () => {
     expect(ctx.pendingToolSpans.size).toBe(1)
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     expect(ctx.pendingToolSpans.size).toBe(0)
-    const toolSpan = tracer.spans.find(s => s.name.startsWith("opencode.tool"))!
+    const toolSpan = tracer.spans.find((s) => s.name.startsWith("opencode.tool"))!
     expect(toolSpan.ended).toBe(true)
     expect(toolSpan.status.code).toBe(SpanStatusCode.ERROR)
   })
@@ -390,7 +547,12 @@ describe("orphaned span cleanup", () => {
     const { ctx } = makeCtx()
     const t = makeTracer()
     const span = t.startSpan("tool") as unknown as Span
-    ctx.pendingToolSpans.set("ses_other:call_1", { tool: "bash", sessionID: "ses_other", startMs: 0, span })
+    ctx.pendingToolSpans.set("ses_other:call_1", {
+      tool: "bash",
+      sessionID: "ses_other",
+      startMs: 0,
+      span,
+    })
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     expect(ctx.pendingToolSpans.has("ses_other:call_1")).toBe(true)
@@ -402,7 +564,7 @@ describe("orphaned span cleanup", () => {
     handleMessagePartUpdated(makeToolPartUpdated("running", { sessionID: "ses_1" }), ctx)
     handleSessionError(makeSessionError("ses_1"), ctx)
     expect(ctx.pendingToolSpans.size).toBe(0)
-    const toolSpan = tracer.spans.find(s => s.name.startsWith("opencode.tool"))!
+    const toolSpan = tracer.spans.find((s) => s.name.startsWith("opencode.tool"))!
     expect(toolSpan.ended).toBe(true)
     expect(toolSpan.status.code).toBe(SpanStatusCode.ERROR)
   })
@@ -413,7 +575,7 @@ describe("orphaned span cleanup", () => {
     startMessageSpan("ses_1", "msg_orphan", "claude", "anthropic", 1000, ctx)
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     expect(ctx.messageSpans.has("ses_1:msg_orphan")).toBe(false)
-    const msgSpan = tracer.spans.find(s => s.name === "opencode.llm")!
+    const msgSpan = tracer.spans.find((s) => s.name === "opencode.llm")!
     expect(msgSpan.ended).toBe(true)
     expect(msgSpan.status.code).toBe(SpanStatusCode.ERROR)
   })
@@ -424,7 +586,7 @@ describe("orphaned span cleanup", () => {
     startMessageSpan("ses_1", "msg_orphan", "claude", "anthropic", 1000, ctx)
     handleSessionError(makeSessionError("ses_1"), ctx)
     expect(ctx.messageSpans.has("ses_1:msg_orphan")).toBe(false)
-    const msgSpan = tracer.spans.find(s => s.name === "opencode.llm")!
+    const msgSpan = tracer.spans.find((s) => s.name === "opencode.llm")!
     expect(msgSpan.ended).toBe(true)
     expect(msgSpan.status.code).toBe(SpanStatusCode.ERROR)
   })
@@ -447,7 +609,7 @@ describe("OPENCODE_DISABLE_TRACES=session", () => {
   test("session.created log record still emitted", () => {
     const { ctx, logger } = makeCtx("proj_test", [], ["session"])
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    expect(logger.records.find(r => r.body === "session.created")).toBeDefined()
+    expect(logger.records.find((r) => r.body === "session.created")).toBeDefined()
   })
 
   test("session.idle does not throw when no session span exists", () => {
@@ -494,19 +656,20 @@ describe("OPENCODE_DISABLE_TRACES=llm", () => {
   test("api_request log record still emitted", () => {
     const { ctx, logger } = makeCtx("proj_test", [], ["llm"])
     handleMessageUpdated(makeAssistantMessageUpdated({ id: "msg_1" }), ctx)
-    expect(logger.records.find(r => r.body === "api_request")).toBeDefined()
+    expect(logger.records.find((r) => r.body === "api_request")).toBeDefined()
   })
 
   test("handleMessageUpdated does not throw when no message span exists", () => {
     const { ctx } = makeCtx("proj_test", [], ["llm"])
-    expect(() => handleMessageUpdated(makeAssistantMessageUpdated({ id: "msg_1" }), ctx)).not.toThrow()
+    expect(() =>
+      handleMessageUpdated(makeAssistantMessageUpdated({ id: "msg_1" }), ctx),
+    ).not.toThrow()
   })
 
   test("session spans still created when only llm disabled", () => {
     const { ctx, tracer } = makeCtx("proj_test", [], ["llm"])
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    expect(tracer.spans).toHaveLength(1)
-    expect(tracer.spans[0]!.name).toBe("opencode.session")
+    expect(tracer.spans).toHaveLength(0)
   })
 })
 
@@ -537,7 +700,7 @@ describe("OPENCODE_DISABLE_TRACES=tool", () => {
     const { ctx, logger } = makeCtx("proj_test", [], ["tool"])
     handleMessagePartUpdated(makeToolPartUpdated("running"), ctx)
     handleMessagePartUpdated(makeToolPartUpdated("completed"), ctx)
-    expect(logger.records.find(r => r.body === "tool_result")).toBeDefined()
+    expect(logger.records.find((r) => r.body === "tool_result")).toBeDefined()
   })
 
   test("no tool span created for out-of-order completed event", () => {
@@ -549,7 +712,6 @@ describe("OPENCODE_DISABLE_TRACES=tool", () => {
   test("session spans still created when only tool disabled", () => {
     const { ctx, tracer } = makeCtx("proj_test", [], ["tool"])
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    expect(tracer.spans).toHaveLength(1)
-    expect(tracer.spans[0]!.name).toBe("opencode.session")
+    expect(tracer.spans).toHaveLength(0)
   })
 })

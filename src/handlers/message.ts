@@ -1,6 +1,11 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { SpanStatusCode, SpanKind, context, trace } from "@opentelemetry/api"
-import type { AssistantMessage, EventMessageUpdated, EventMessagePartUpdated, ToolPart } from "@opencode-ai/sdk"
+import type {
+  AssistantMessage,
+  EventMessageUpdated,
+  EventMessagePartUpdated,
+  ToolPart,
+} from "@opencode-ai/sdk"
 import {
   AGENT_NAME,
   INPUT_MIME_TYPE,
@@ -27,8 +32,15 @@ import {
   TOOL_NAME,
   TOOL_PARAMETERS,
 } from "@arizeai/openinference-semantic-conventions"
-import { errorSummary, setBoundedMap, accumulateSessionTotals, isMetricEnabled, isTraceEnabled } from "../util.ts"
+import {
+  errorSummary,
+  setBoundedMap,
+  accumulateSessionTotals,
+  isMetricEnabled,
+  isTraceEnabled,
+} from "../util.ts"
 import type { HandlerContext } from "../types.ts"
+import { resolveSessionTraceContext } from "./session.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 const LLM_FINISH_REASON = "llm.finish_reason"
@@ -58,37 +70,99 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
   const duration = assistant.time.completed - assistant.time.created
   const agent = ctx.sessionTotals.get(sessionID)?.agent ?? "unknown"
 
-  const totalTokens = assistant.tokens.input + assistant.tokens.output + assistant.tokens.reasoning
-    + assistant.tokens.cache.read + assistant.tokens.cache.write
+  const totalTokens =
+    assistant.tokens.input +
+    assistant.tokens.output +
+    assistant.tokens.reasoning +
+    assistant.tokens.cache.read +
+    assistant.tokens.cache.write
 
   if (isMetricEnabled("token.usage", ctx)) {
     const { tokenCounter } = ctx.instruments
-    tokenCounter.add(assistant.tokens.input, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "input" })
-    tokenCounter.add(assistant.tokens.output, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "output" })
-    tokenCounter.add(assistant.tokens.reasoning, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "reasoning" })
-    tokenCounter.add(assistant.tokens.cache.read, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheRead" })
-    tokenCounter.add(assistant.tokens.cache.write, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheCreation" })
+    tokenCounter.add(assistant.tokens.input, {
+      ...ctx.commonAttrs,
+      "session.id": sessionID,
+      model: modelID,
+      agent,
+      type: "input",
+    })
+    tokenCounter.add(assistant.tokens.output, {
+      ...ctx.commonAttrs,
+      "session.id": sessionID,
+      model: modelID,
+      agent,
+      type: "output",
+    })
+    tokenCounter.add(assistant.tokens.reasoning, {
+      ...ctx.commonAttrs,
+      "session.id": sessionID,
+      model: modelID,
+      agent,
+      type: "reasoning",
+    })
+    tokenCounter.add(assistant.tokens.cache.read, {
+      ...ctx.commonAttrs,
+      "session.id": sessionID,
+      model: modelID,
+      agent,
+      type: "cacheRead",
+    })
+    tokenCounter.add(assistant.tokens.cache.write, {
+      ...ctx.commonAttrs,
+      "session.id": sessionID,
+      model: modelID,
+      agent,
+      type: "cacheCreation",
+    })
   }
 
   if (isMetricEnabled("cost.usage", ctx)) {
-    ctx.instruments.costCounter.add(assistant.cost, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent })
+    ctx.instruments.costCounter.add(assistant.cost, {
+      ...ctx.commonAttrs,
+      "session.id": sessionID,
+      model: modelID,
+      agent,
+    })
   }
 
   if (isMetricEnabled("cache.count", ctx)) {
     if (assistant.tokens.cache.read > 0) {
-      ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheRead" })
+      ctx.instruments.cacheCounter.add(1, {
+        ...ctx.commonAttrs,
+        "session.id": sessionID,
+        model: modelID,
+        agent,
+        type: "cacheRead",
+      })
     }
     if (assistant.tokens.cache.write > 0) {
-      ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheCreation" })
+      ctx.instruments.cacheCounter.add(1, {
+        ...ctx.commonAttrs,
+        "session.id": sessionID,
+        model: modelID,
+        agent,
+        type: "cacheCreation",
+      })
     }
   }
 
   if (isMetricEnabled("message.count", ctx)) {
-    ctx.instruments.messageCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent })
+    ctx.instruments.messageCounter.add(1, {
+      ...ctx.commonAttrs,
+      "session.id": sessionID,
+      model: modelID,
+      agent,
+    })
   }
 
   if (isMetricEnabled("model.usage", ctx)) {
-    ctx.instruments.modelUsageCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, provider: providerID, agent })
+    ctx.instruments.modelUsageCounter.add(1, {
+      ...ctx.commonAttrs,
+      "session.id": sessionID,
+      model: modelID,
+      provider: providerID,
+      agent,
+    })
   }
 
   accumulateSessionTotals(sessionID, totalTokens, assistant.cost, ctx)
@@ -129,7 +203,10 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
       duration_ms: duration,
     })
     if (assistant.error) {
-      msgSpan.setStatus({ code: SpanStatusCode.ERROR, message: errorSummary(assistant.error) })
+      msgSpan.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: errorSummary(assistant.error),
+      })
     } else {
       msgSpan.setStatus({ code: SpanStatusCode.OK })
     }
@@ -256,9 +333,6 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
       const toolSpan = isTraceEnabled("tool", ctx)
         ? (() => {
             const sessionSpan = ctx.sessionSpans.get(toolPart.sessionID)
-            const parentCtx = sessionSpan
-              ? trace.setSpan(context.active(), sessionSpan)
-              : context.active()
             return ctx.tracer.startSpan(
               `${ctx.tracePrefix}tool.${toolPart.tool}`,
               {
@@ -275,7 +349,7 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
                   ...ctx.commonAttrs,
                 },
               },
-              parentCtx,
+              resolveSessionTraceContext(toolPart.sessionID, ctx) ?? context.active(),
             )
           })()
         : undefined
@@ -285,7 +359,11 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
         startMs: toolPart.state.time.start,
         span: toolSpan,
       })
-      ctx.log("debug", "otel: tool span started", { sessionID: toolPart.sessionID, tool: toolPart.tool, key })
+      ctx.log("debug", "otel: tool span started", {
+        sessionID: toolPart.sessionID,
+        tool: toolPart.tool,
+        key,
+      })
       return
     }
 
@@ -309,30 +387,28 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
     }
 
     if (isTraceEnabled("tool", ctx)) {
-      const toolSpan = pending?.span ?? (() => {
-        const sessionSpan = ctx.sessionSpans.get(toolPart.sessionID)
-        const parentCtx = sessionSpan
-          ? trace.setSpan(context.active(), sessionSpan)
-          : context.active()
-        return ctx.tracer.startSpan(
-          `${ctx.tracePrefix}tool.${toolPart.tool}`,
-          {
-            startTime: start,
-            kind: SpanKind.INTERNAL,
-            attributes: {
-              [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.TOOL,
-              [SESSION_ID]: toolPart.sessionID,
-              [TOOL_ID]: toolPart.callID,
-              [TOOL_NAME]: toolPart.tool,
-              [TOOL_PARAMETERS]: JSON.stringify(toolPart.state.input),
-              [INPUT_VALUE]: JSON.stringify(toolPart.state.input),
-              [INPUT_MIME_TYPE]: MimeType.JSON,
-              ...ctx.commonAttrs,
+      const toolSpan =
+        pending?.span ??
+        (() => {
+          return ctx.tracer.startSpan(
+            `${ctx.tracePrefix}tool.${toolPart.tool}`,
+            {
+              startTime: start,
+              kind: SpanKind.INTERNAL,
+              attributes: {
+                [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.TOOL,
+                [SESSION_ID]: toolPart.sessionID,
+                [TOOL_ID]: toolPart.callID,
+                [TOOL_NAME]: toolPart.tool,
+                [TOOL_PARAMETERS]: JSON.stringify(toolPart.state.input),
+                [INPUT_VALUE]: JSON.stringify(toolPart.state.input),
+                [INPUT_MIME_TYPE]: MimeType.JSON,
+                ...ctx.commonAttrs,
+              },
             },
-          },
-          parentCtx,
-        )
-      })()
+            resolveSessionTraceContext(toolPart.sessionID, ctx) ?? context.active(),
+          )
+        })()
       toolSpan.setAttribute("tool.success", success)
       if (success) {
         const output = (toolPart.state as { output: string }).output
@@ -355,7 +431,12 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
     }
 
     const sizeAttr = success
-      ? { tool_result_size_bytes: Buffer.byteLength((toolPart.state as { output: string }).output, "utf8") }
+      ? {
+          tool_result_size_bytes: Buffer.byteLength(
+            (toolPart.state as { output: string }).output,
+            "utf8",
+          ),
+        }
       : { error: (toolPart.state as { error: string }).error }
 
     ctx.logger.emit({
@@ -407,11 +488,6 @@ export function startMessageSpan(
   if (!isTraceEnabled("llm", ctx)) return
   const msgKey = `${sessionID}:${messageID}`
   if (ctx.messageSpans.has(msgKey)) return
-  const sessionSpan = ctx.sessionSpans.get(sessionID)
-  const parentCtx = sessionSpan
-    ? trace.setSpan(context.active(), sessionSpan)
-    : context.active()
-
   const msgSpan = ctx.tracer.startSpan(
     `${ctx.tracePrefix}llm`,
     {
@@ -428,13 +504,15 @@ export function startMessageSpan(
           ? {
               [INPUT_VALUE]: ctx.sessionInputs.get(sessionID)!,
               [INPUT_MIME_TYPE]: MimeType.TEXT,
-              [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: ctx.sessionInputs.get(sessionID)! }]),
+              [LLM_INPUT_MESSAGES]: JSON.stringify([
+                { role: "user", content: ctx.sessionInputs.get(sessionID)! },
+              ]),
             }
           : {}),
         ...ctx.commonAttrs,
       },
     },
-    parentCtx,
+    resolveSessionTraceContext(sessionID, ctx) ?? context.active(),
   )
   setBoundedMap(ctx.messageSpans, msgKey, msgSpan)
 }
