@@ -1,5 +1,5 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
-import { SpanStatusCode, SpanKind, context, trace } from "@opentelemetry/api"
+import { ROOT_CONTEXT, SpanStatusCode, SpanKind, trace } from "@opentelemetry/api"
 import type {
   AssistantMessage,
   EventMessageUpdated,
@@ -349,7 +349,9 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
                   ...ctx.commonAttrs,
                 },
               },
-              resolveSessionTraceContext(toolPart.sessionID, ctx) ?? context.active(),
+              resolveSessionTraceContext(toolPart.sessionID, ctx) ??
+                ctx.parentContext ??
+                ROOT_CONTEXT,
             )
           })()
         : undefined
@@ -406,7 +408,9 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
                 ...ctx.commonAttrs,
               },
             },
-            resolveSessionTraceContext(toolPart.sessionID, ctx) ?? context.active(),
+            resolveSessionTraceContext(toolPart.sessionID, ctx) ??
+              ctx.parentContext ??
+              ROOT_CONTEXT,
           )
         })()
       toolSpan.setAttribute("tool.success", success)
@@ -512,7 +516,7 @@ export function startMessageSpan(
         ...ctx.commonAttrs,
       },
     },
-    resolveSessionTraceContext(sessionID, ctx) ?? context.active(),
+    resolveSessionTraceContext(sessionID, ctx) ?? ctx.parentContext ?? ROOT_CONTEXT,
   )
   setBoundedMap(ctx.messageSpans, msgKey, msgSpan)
 }

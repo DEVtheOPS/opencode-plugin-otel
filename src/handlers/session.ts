@@ -1,5 +1,5 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
-import { SpanStatusCode, context, trace } from "@opentelemetry/api"
+import { ROOT_CONTEXT, SpanStatusCode, trace } from "@opentelemetry/api"
 import type {
   EventSessionCreated,
   EventSessionIdle,
@@ -22,13 +22,14 @@ import type { HandlerContext } from "../types.ts"
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 
 export function resolveSessionTraceContext(sessionID: string, ctx: HandlerContext) {
+  const parentContext = ctx.parentContext ?? ROOT_CONTEXT
   const sessionSpan = ctx.sessionSpans.get(sessionID)
-  if (sessionSpan) return trace.setSpan(context.active(), sessionSpan)
+  if (sessionSpan) return trace.setSpan(parentContext, sessionSpan)
   const spanContext = ctx.sessionSpanContexts.get(sessionID)
-  if (spanContext) return trace.setSpanContext(context.active(), spanContext)
+  if (spanContext) return trace.setSpanContext(parentContext, spanContext)
   const runRootID = ctx.sessionRunRoots.get(sessionID)
   const runSpanContext = runRootID ? ctx.runSpanContexts.get(runRootID) : undefined
-  return runSpanContext ? trace.setSpanContext(context.active(), runSpanContext) : undefined
+  return runSpanContext ? trace.setSpanContext(parentContext, runSpanContext) : undefined
 }
 
 export function handleRunStarted(
@@ -119,7 +120,7 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
           ...ctx.commonAttrs,
         },
       },
-      spanCtx ?? context.active(),
+      spanCtx ?? ctx.parentContext ?? ROOT_CONTEXT,
     )
     setBoundedMap(ctx.sessionSpans, sessionID, sessionSpan)
     setBoundedMap(ctx.sessionSpanContexts, sessionID, sessionSpan.spanContext())

@@ -1,7 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { logs } from "@opentelemetry/api-logs"
-import { trace } from "@opentelemetry/api"
+import { context, trace } from "@opentelemetry/api"
 import {
   AGENT_NAME,
   INPUT_MIME_TYPE,
@@ -152,6 +152,11 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     messageOutputs,
   }
 
+  const withParentContext = (): HandlerContext => ({
+    ...ctx,
+    parentContext: context.active(),
+  })
+
   async function shutdown() {
     await Promise.allSettled([
       meterProvider.shutdown(),
@@ -204,6 +209,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     },
 
     "chat.message": safe("chat.message", async (input, output) => {
+      const handlerCtx = withParentContext()
       const agent = input.agent ?? "unknown"
       const totals = sessionTotals.get(input.sessionID)
       if (totals) totals.agent = agent
@@ -240,7 +246,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
           model,
         })
       } else {
-        handleRunStarted(input.sessionID, agent, promptText, model, Date.now(), ctx)
+        handleRunStarted(input.sessionID, agent, promptText, model, Date.now(), handlerCtx)
       }
       const promptLength = promptText.length
       logger.emit({
@@ -261,30 +267,31 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     }),
 
     event: safe("event", async ({ event }) => {
+      const handlerCtx = withParentContext()
       switch (event.type) {
         case "session.created":
-          await handleSessionCreated(event as EventSessionCreated, ctx)
+          await handleSessionCreated(event as EventSessionCreated, handlerCtx)
           break
         case "session.idle":
-          handleSessionIdle(event as EventSessionIdle, ctx)
+          handleSessionIdle(event as EventSessionIdle, handlerCtx)
           break
         case "session.error":
-          handleSessionError(event as EventSessionError, ctx)
+          handleSessionError(event as EventSessionError, handlerCtx)
           break
         case "session.status":
-          handleSessionStatus(event as EventSessionStatus, ctx)
+          handleSessionStatus(event as EventSessionStatus, handlerCtx)
           break
         case "session.diff":
-          handleSessionDiff(event as EventSessionDiff, ctx)
+          handleSessionDiff(event as EventSessionDiff, handlerCtx)
           break
         case "command.executed":
-          handleCommandExecuted(event as EventCommandExecuted, ctx)
+          handleCommandExecuted(event as EventCommandExecuted, handlerCtx)
           break
         case "permission.updated":
-          handlePermissionUpdated(event as EventPermissionUpdated, ctx)
+          handlePermissionUpdated(event as EventPermissionUpdated, handlerCtx)
           break
         case "permission.replied":
-          handlePermissionReplied(event as EventPermissionReplied, ctx)
+          handlePermissionReplied(event as EventPermissionReplied, handlerCtx)
           break
         case "message.updated": {
           const msgEvt = event as EventMessageUpdated
@@ -296,14 +303,14 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
               info.modelID ?? "unknown",
               info.providerID ?? "unknown",
               info.time?.created ?? Date.now(),
-              ctx,
+              handlerCtx,
             )
           }
-          await handleMessageUpdated(msgEvt, ctx)
+          await handleMessageUpdated(msgEvt, handlerCtx)
           break
         }
         case "message.part.updated":
-          await handleMessagePartUpdated(event as EventMessagePartUpdated, ctx)
+          await handleMessagePartUpdated(event as EventMessagePartUpdated, handlerCtx)
           break
       }
     }),
