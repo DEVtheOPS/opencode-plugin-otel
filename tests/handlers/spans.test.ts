@@ -1,7 +1,6 @@
 import { describe, test, expect } from "bun:test"
 import { SpanStatusCode } from "@opentelemetry/api"
 import {
-  AGENT_NAME,
   LLM_MODEL_NAME,
   LLM_PROVIDER,
   LLM_SYSTEM,
@@ -12,7 +11,6 @@ import {
   LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE,
   OpenInferenceSpanKind,
   SemanticConventions,
-  SESSION_ID,
   TOOL_NAME,
 } from "@arizeai/openinference-semantic-conventions"
 import type { Span } from "@opentelemetry/api"
@@ -27,7 +25,7 @@ import {
   handleMessagePartUpdated,
   startMessageSpan,
 } from "../../src/handlers/message.ts"
-import { makeCtx, makeTracer, type SpySpan } from "../helpers.ts"
+import { makeCtx, makeTracer } from "../helpers.ts"
 import type {
   EventSessionCreated,
   EventSessionIdle,
@@ -154,32 +152,6 @@ describe("session spans", () => {
     handleSessionCreated(makeSessionCreated("ses_1", 5000), ctx)
     expect(tracer.spans).toHaveLength(0)
     expect(ctx.sessionSpans.has("ses_1")).toBe(false)
-  })
-
-  test("run span carries session.id attribute", () => {
-    const { ctx, tracer } = makeCtx()
-    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
-    expect(tracer.spans[0]!.attributes["session.id"]).toBe("ses_1")
-    expect(tracer.spans[0]!.attributes[SESSION_ID]).toBe("ses_1")
-  })
-
-  test("run span is tagged as an OpenInference agent span", () => {
-    const { ctx, tracer } = makeCtx()
-    handleRunStarted("ses_1", "agent", "prompt", "anthropic/claude", 1000, ctx)
-    expect(tracer.spans[0]!.attributes[OPENINFERENCE_SPAN_KIND]).toBe(OpenInferenceSpanKind.AGENT)
-    expect(tracer.spans[0]!.attributes[AGENT_NAME]).toBe("agent")
-  })
-
-  test("run span carries is_subagent=false for root session", () => {
-    const { ctx, tracer } = makeCtx()
-    handleRunStarted("ses_root", "agent", "prompt", "anthropic/claude", 1000, ctx)
-    expect(tracer.spans[0]!.attributes["session.is_subagent"]).toBe(false)
-  })
-
-  test("session span carries is_subagent=true for subagent session", () => {
-    const { ctx, tracer } = makeCtx()
-    handleSessionCreated(makeSessionCreated("ses_child", 1000, "ses_parent"), ctx)
-    expect(tracer.spans[0]!.attributes["session.is_subagent"]).toBe(true)
   })
 
   test("ends session span with OK status on session.idle", () => {

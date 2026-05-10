@@ -2,6 +2,13 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { logs } from "@opentelemetry/api-logs"
 import { trace } from "@opentelemetry/api"
+import {
+  AGENT_NAME,
+  INPUT_MIME_TYPE,
+  INPUT_VALUE,
+  LLM_INPUT_MESSAGES,
+  MimeType,
+} from "@arizeai/openinference-semantic-conventions"
 import pkg from "../package.json" with { type: "json" }
 import type {
   EventSessionCreated,
@@ -218,14 +225,23 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
         .filter(Boolean)
         .join("\n")
       sessionInputs.set(input.sessionID, promptText)
-      handleRunStarted(
-        input.sessionID,
-        agent,
-        promptText,
-        input.model ? `${input.model.providerID}/${input.model.modelID}` : "unknown",
-        Date.now(),
-        ctx,
-      )
+      const model = input.model ? `${input.model.providerID}/${input.model.modelID}` : "unknown"
+      const sessionSpan = sessionSpans.get(input.sessionID)
+      if (sessionSpan) {
+        sessionSpan.setAttributes({
+          [AGENT_NAME]: agent,
+          ...(promptText
+            ? {
+                [INPUT_VALUE]: promptText,
+                [INPUT_MIME_TYPE]: MimeType.TEXT,
+                [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
+              }
+            : {}),
+          model,
+        })
+      } else {
+        handleRunStarted(input.sessionID, agent, promptText, model, Date.now(), ctx)
+      }
       const promptLength = promptText.length
       logger.emit({
         severityNumber: SeverityNumber.INFO,
@@ -238,7 +254,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
           "session.id": input.sessionID,
           agent,
           prompt_length: promptLength,
-          model: input.model ? `${input.model.providerID}/${input.model.modelID}` : "unknown",
+          model,
           ...commonAttrs,
         },
       })
