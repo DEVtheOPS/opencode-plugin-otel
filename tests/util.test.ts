@@ -10,9 +10,10 @@ describe("safeUsername", () => {
   })
 
   test("returns the OS username on success", () => {
-    const u = safeUsername()
-    expect(typeof u).toBe("string")
-    expect((u as string).length).toBeGreaterThan(0)
+    os.userInfo = mock(
+      () => ({ username: "alice" } as unknown as ReturnType<typeof os.userInfo>),
+    ) as typeof os.userInfo
+    expect(safeUsername()).toBe("alice")
   })
 
   test("returns undefined when os.userInfo() throws", () => {
