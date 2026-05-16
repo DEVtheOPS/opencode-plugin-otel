@@ -1,5 +1,18 @@
+import os from "node:os"
 import { MAX_PENDING } from "./types.ts"
 import type { HandlerContext } from "./types.ts"
+
+/**
+ * Returns the OS-level username, or `undefined` when `os.userInfo()` throws
+ * (e.g. containerised runs with no matching passwd entry).
+ */
+export function safeUsername(): string | undefined {
+  try {
+    return os.userInfo().username
+  } catch {
+    return undefined
+  }
+}
 
 /** Returns a human-readable summary string from an opencode error object. */
 export function errorSummary(err: { name: string; data?: unknown } | undefined): string {

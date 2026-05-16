@@ -1,6 +1,25 @@
-import { describe, test, expect } from "bun:test"
-import { errorSummary, setBoundedMap, isMetricEnabled, isTraceEnabled } from "../src/util.ts"
+import { describe, test, expect, mock, afterEach } from "bun:test"
+import os from "node:os"
+import { errorSummary, setBoundedMap, isMetricEnabled, isTraceEnabled, safeUsername } from "../src/util.ts"
 import { MAX_PENDING } from "../src/types.ts"
+
+describe("safeUsername", () => {
+  const originalUserInfo = os.userInfo
+  afterEach(() => {
+    os.userInfo = originalUserInfo
+  })
+
+  test("returns the OS username on success", () => {
+    const u = safeUsername()
+    expect(typeof u).toBe("string")
+    expect((u as string).length).toBeGreaterThan(0)
+  })
+
+  test("returns undefined when os.userInfo() throws", () => {
+    os.userInfo = mock(() => { throw new Error("no passwd entry") }) as typeof os.userInfo
+    expect(safeUsername()).toBeUndefined()
+  })
+})
 
 describe("errorSummary", () => {
   test("returns 'unknown' for undefined", () => {

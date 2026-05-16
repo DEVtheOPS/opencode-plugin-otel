@@ -16,6 +16,7 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
   - [Quick start](#quick-start)
   - [Headers and resource attributes](#headers-and-resource-attributes)
   - [Dynamic headers](#dynamic-headers)
+  - [User identity tracking](#user-identity-tracking)
   - [Disabling specific metrics](#disabling-specific-metrics)
   - [Datadog example](#datadog-example)
   - [Honeycomb example](#honeycomb-example)
@@ -93,6 +94,7 @@ All configuration is via environment variables. Set them in your shell profile (
 | `OPENCODE_OTLP_HEADERS_HELPER` | _(unset)_ | Executable script/binary that returns dynamic OTLP headers as JSON after an auth failure. Helper headers override `OPENCODE_OTLP_HEADERS`. |
 | `OPENCODE_RESOURCE_ATTRIBUTES` | _(unset)_ | Comma-separated `key=value` pairs merged into the OTel resource. Example: `service.version=1.2.3,deployment.environment=production` |
 | `OPENCODE_OTLP_METRICS_TEMPORALITY` | _(unset)_ | Metrics aggregation temporality: `delta`, `cumulative`, or `lowmemory`. Required for Datadog (`delta`). Copied to `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`. |
+| `OPENCODE_DISABLE_USER_TRACKING` | _(unset)_ | Set to any non-empty value to omit `enduser.id` from all signals and the resource. See [User identity tracking](#user-identity-tracking). |
 
 ### Quick start
 
@@ -141,6 +143,33 @@ printf '{"Authorization":"Bearer %s"}' "$(get-token.sh)"
 For a Cloud Run collector using IAM authentication, `get-token.sh` might be `gcloud auth print-identity-token`.
 
 If `OPENCODE_OTLP_HEADERS` is also set, helper-provided headers override static headers with the same name. Header values are never logged.
+
+### User identity tracking
+
+The plugin tags every metric datapoint, log record, and trace span with an `enduser.id` attribute identifying the developer running the session. The value is auto-detected from `os.userInfo().username`; if opencode's config sets a custom `username`, that value supersedes the OS one for metrics and logs once the config hook fires.
+
+The reason this is a signal-level attribute (not just a resource attribute set via `OPENCODE_RESOURCE_ATTRIBUTES`) is that some OTLP backends — Datadog's direct OTLP intake in particular — only promote a hardcoded set of well-known resource attributes to tags. Custom resource attributes like `enduser.id` are silently dropped. Datapoint-level attributes are always preserved.
+
+| Signal | Where `enduser.id` lives |
+|--------|--------------------------|
+| Metrics | Datapoint attribute (refined by `cfg.username` after config hook) |
+| Logs | Log record attribute (refined by `cfg.username` after config hook) |
+| Traces | Resource attribute (frozen at startup) **and** span attribute (refined by `cfg.username` for spans started after the config hook fires) |
+
+Override precedence:
+
+- `OPENCODE_RESOURCE_ATTRIBUTES=enduser.id=…` overrides the resource-level value (used by trace spans and, depending on the backend, attached to metric/log records). It does not affect span attributes set per-span from the auto-detected username.
+- The trace resource is built once at startup and does not refresh when `cfg.username` arrives later; new span attributes do reflect that refinement. In practice the OS and configured usernames are identical for almost every user.
+
+If `os.userInfo()` throws (e.g. containerised runs with no passwd entry), `enduser.id` is omitted from every signal rather than tagged with a placeholder.
+
+To opt out entirely:
+
+```bash
+export OPENCODE_DISABLE_USER_TRACKING=1
+```
+
+When set, `enduser.id` is omitted from `commonAttrs` and from the auto-detected resource. If `OPENCODE_RESOURCE_ATTRIBUTES=enduser.id=…` is set in addition, the explicit value still lands on the resource (the env merge runs unconditionally).
 
 ### Disabling specific metrics
 

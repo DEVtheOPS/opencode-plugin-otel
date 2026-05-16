@@ -25,16 +25,18 @@ import {
 
 /**
  * Builds an OTel `Resource` seeded with `service.name`, `app.version`, `os.type`, and
- * `host.arch`. Additional attributes from `OTEL_RESOURCE_ATTRIBUTES` are merged in and
- * may override the defaults.
+ * `host.arch`. When `endUserId` is provided, `enduser.id` is seeded too. Additional
+ * attributes from `OTEL_RESOURCE_ATTRIBUTES` are merged in last and may override the
+ * defaults (including `enduser.id`).
  */
-export function buildResource(version: string) {
+export function buildResource(version: string, endUserId?: string) {
   const attrs: Record<string, string> = {
     [ATTR_SERVICE_NAME]: "opencode",
     "app.version": version,
     "os.type": process.platform,
     [ATTR_HOST_ARCH]: process.arch,
   }
+  if (endUserId) attrs["enduser.id"] = endUserId
   const raw = process.env["OTEL_RESOURCE_ATTRIBUTES"]
   if (raw) {
     for (const pair of raw.split(",")) {
@@ -76,8 +78,9 @@ export async function setupOtel(
   version: string,
   otlpHeaders?: string,
   otlpHeadersHelper?: string,
+  endUserId?: string,
 ): Promise<OtelProviders> {
-  const resource = buildResource(version)
+  const resource = buildResource(version, endUserId)
   const staticHeaders = parseOtlpHeaders(otlpHeaders)
   const dynamicHeaders = new DynamicHeaders(staticHeaders, otlpHeadersHelper)
   if (otlpHeadersHelper) {

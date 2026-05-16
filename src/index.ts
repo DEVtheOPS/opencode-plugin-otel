@@ -16,10 +16,11 @@ import type {
   EventSessionDiff,
   EventCommandExecuted,
 } from "@opencode-ai/sdk"
-import { LEVELS, type Level, type HandlerContext } from "./types.ts"
+import { LEVELS, type Level, type HandlerContext, type MutableCommonAttrs } from "./types.ts"
 import { loadConfig, resolveHelperPath, resolveLogLevel } from "./config.ts"
 import { probeEndpoint } from "./probe.ts"
 import { setupOtel, createInstruments } from "./otel.ts"
+import { safeUsername } from "./util.ts"
 import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus } from "./handlers/session.ts"
 import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "./handlers/message.ts"
 import { handlePermissionUpdated, handlePermissionReplied } from "./handlers/permission.ts"
@@ -73,6 +74,8 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     })
   }
 
+  const endUserId = config.disableUserTracking ? undefined : safeUsername()
+
   const { meterProvider, loggerProvider, tracerProvider } = await setupOtel(
     config.endpoint,
     config.protocol,
@@ -81,6 +84,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     PLUGIN_VERSION,
     config.otlpHeaders,
     otlpHeadersHelper,
+    endUserId,
   )
   await log("info", "OTel SDK initialized")
 
@@ -95,7 +99,8 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
   const sessionInputs = new Map()
   const messageOutputs = new Map()
   const { disabledMetrics, disabledTraces } = config
-  const commonAttrs = { "project.id": project.id } as const
+  const commonAttrs: MutableCommonAttrs = { "project.id": project.id }
+  if (endUserId) commonAttrs["enduser.id"] = endUserId
 
   if (disabledMetrics.size > 0) {
     await log("info", "metrics disabled", { disabled: [...disabledMetrics] })
@@ -156,6 +161,10 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
         } else if (cfg.logLevel.toLowerCase() !== minLevel) {
           await log("warn", `unknown log level "${cfg.logLevel}", keeping "${minLevel}"`)
         }
+      }
+      const trimmedUsername = cfg.username?.trim()
+      if (!config.disableUserTracking && trimmedUsername) {
+        commonAttrs["enduser.id"] = trimmedUsername
       }
     },
 

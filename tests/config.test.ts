@@ -53,6 +53,7 @@ describe("loadConfig", () => {
     "OPENCODE_OTLP_METRICS_TEMPORALITY",
     "OPENCODE_DISABLE_METRICS",
     "OPENCODE_DISABLE_TRACES",
+    "OPENCODE_DISABLE_USER_TRACKING",
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_RESOURCE_ATTRIBUTES",
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
@@ -258,6 +259,20 @@ describe("loadConfig", () => {
     expect(disabledTraces.has("session")).toBe(true)
     expect(disabledTraces.has("unknown_type")).toBe(true)
     expect(disabledTraces.size).toBe(2)
+  })
+
+  test("disableUserTracking defaults to false", () => {
+    expect(loadConfig().disableUserTracking).toBe(false)
+  })
+
+  test("disableUserTracking is true when OPENCODE_DISABLE_USER_TRACKING is set", () => {
+    process.env["OPENCODE_DISABLE_USER_TRACKING"] = "1"
+    expect(loadConfig().disableUserTracking).toBe(true)
+  })
+
+  test("disableUserTracking accepts any non-empty value", () => {
+    process.env["OPENCODE_DISABLE_USER_TRACKING"] = "true"
+    expect(loadConfig().disableUserTracking).toBe(true)
   })
 })
 
