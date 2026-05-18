@@ -19,6 +19,7 @@ export type PluginConfig = {
   metricsTemporality: MetricsTemporality | undefined
   disabledMetrics: Set<string>
   disabledTraces: Set<string>
+  disableUserTracking: boolean
 }
 
 /** Parses a positive integer from an environment variable, returning `fallback` if absent or invalid. */
@@ -88,6 +89,7 @@ export function loadConfig(): PluginConfig {
     metricsTemporality,
     disabledMetrics,
     disabledTraces,
+    disableUserTracking: !!process.env["OPENCODE_DISABLE_USER_TRACKING"],
   }
 }
 

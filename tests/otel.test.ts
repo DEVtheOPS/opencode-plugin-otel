@@ -40,4 +40,22 @@ describe("buildResource", () => {
     const resource = buildResource("0.0.1")
     expect(resource.attributes["service.name"]).toBe("my-override")
   })
+
+  test("includes enduser.id when endUserId is provided", () => {
+    delete process.env["OTEL_RESOURCE_ATTRIBUTES"]
+    const resource = buildResource("0.0.1", "alice")
+    expect(resource.attributes["enduser.id"]).toBe("alice")
+  })
+
+  test("omits enduser.id when endUserId is undefined", () => {
+    delete process.env["OTEL_RESOURCE_ATTRIBUTES"]
+    const resource = buildResource("0.0.1")
+    expect(resource.attributes["enduser.id"]).toBeUndefined()
+  })
+
+  test("OTEL_RESOURCE_ATTRIBUTES enduser.id overrides endUserId argument", () => {
+    process.env["OTEL_RESOURCE_ATTRIBUTES"] = "enduser.id=override"
+    const resource = buildResource("0.0.1", "alice")
+    expect(resource.attributes["enduser.id"]).toBe("override")
+  })
 })
