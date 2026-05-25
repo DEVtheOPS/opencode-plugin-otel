@@ -1,9 +1,9 @@
 import { describe, test, expect } from "bun:test"
 import { handleSessionCreated, handleSessionIdle, handleSessionStatus } from "../../src/handlers/session.ts"
 import { handleMessageUpdated, handleMessagePartUpdated } from "../../src/handlers/message.ts"
-import { handleSessionDiff, handleCommandExecuted } from "../../src/handlers/activity.ts"
+import { handleSessionDiff, handleToolResult } from "../../src/handlers/activity.ts"
 import { makeCtx } from "../helpers.ts"
-import type { EventSessionCreated, EventSessionIdle, EventSessionStatus, EventMessageUpdated, EventMessagePartUpdated, EventSessionDiff, EventCommandExecuted } from "@opencode-ai/sdk"
+import type { EventSessionCreated, EventSessionIdle, EventSessionStatus, EventMessageUpdated, EventMessagePartUpdated, EventSessionDiff } from "@opencode-ai/sdk"
 
 function makeSessionCreated(sessionID: string): EventSessionCreated {
   return {
@@ -59,11 +59,8 @@ function makeSessionDiff(): EventSessionDiff {
   } as unknown as EventSessionDiff
 }
 
-function makeCommandExecuted(cmd: string): EventCommandExecuted {
-  return {
-    type: "command.executed",
-    properties: { sessionID: "ses_1", name: "bash", arguments: cmd },
-  } as unknown as EventCommandExecuted
+function bashCommit(command: string) {
+  return { command, description: "Create commit" }
 }
 
 describe("OPENCODE_DISABLE_METRICS", () => {
@@ -189,13 +186,13 @@ describe("OPENCODE_DISABLE_METRICS", () => {
   describe("commit.count disabled", () => {
     test("does not increment commit counter", () => {
       const { ctx, counters } = makeCtx("proj_test", ["commit.count"])
-      handleCommandExecuted(makeCommandExecuted("git commit -m 'test'"), ctx)
+      handleToolResult("bash", bashCommit("git commit -m 'test'"), "ses_1", ctx)
       expect(counters.commit.calls).toHaveLength(0)
     })
 
     test("still emits commit log record", () => {
       const { ctx, logger } = makeCtx("proj_test", ["commit.count"])
-      handleCommandExecuted(makeCommandExecuted("git commit -m 'test'"), ctx)
+      handleToolResult("bash", bashCommit("git commit -m 'test'"), "ses_1", ctx)
       expect(logger.records.at(0)!.body).toBe("commit")
     })
   })
@@ -247,7 +244,7 @@ describe("OPENCODE_DISABLE_METRICS", () => {
       handleSessionIdle(makeSessionIdle("ses_1"), ctx)
       handleSessionStatus(makeSessionStatus("ses_1"), ctx)
       handleSessionDiff(makeSessionDiff(), ctx)
-      handleCommandExecuted(makeCommandExecuted("git commit -m 'test'"), ctx)
+      handleToolResult("bash", bashCommit("git commit -m 'test'"), "ses_1", ctx)
       await handleMessagePartUpdated(makeToolPart("running"), ctx)
       await handleMessagePartUpdated(makeToolPart("completed"), ctx)
       await handleMessagePartUpdated(subtaskEvent, ctx)

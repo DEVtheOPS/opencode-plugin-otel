@@ -37,6 +37,7 @@ import {
   isTraceEnabled,
   resolveSessionTraceContext,
 } from "../util.ts"
+import { handleToolResult } from "./activity.ts"
 import type { HandlerContext } from "../types.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
@@ -372,6 +373,10 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
     const sizeAttr = success
       ? { tool_result_size_bytes: Buffer.byteLength((toolPart.state as { output: string }).output, "utf8") }
       : { error: (toolPart.state as { error: string }).error }
+
+    if (success) {
+      handleToolResult(toolPart.tool, toolPart.state.input, toolPart.sessionID, ctx)
+    }
 
     ctx.emitLog({
       severityNumber: success ? SeverityNumber.INFO : SeverityNumber.ERROR,

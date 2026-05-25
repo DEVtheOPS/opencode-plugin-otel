@@ -2,10 +2,9 @@ import { describe, test, expect } from "bun:test"
 import { handleSessionCreated, handleSessionIdle } from "../../src/handlers/session.ts"
 import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "../../src/handlers/message.ts"
 import { handlePermissionReplied } from "../../src/handlers/permission.ts"
-import { handleCommandExecuted } from "../../src/handlers/activity.ts"
+import { handleToolResult } from "../../src/handlers/activity.ts"
 import { makeCtx } from "../helpers.ts"
 import type {
-  EventCommandExecuted,
   EventMessagePartUpdated,
   EventMessageUpdated,
   EventPermissionReplied,
@@ -67,12 +66,7 @@ function makePermissionReplied(): EventPermissionReplied {
   } as unknown as EventPermissionReplied
 }
 
-function makeCommandExecuted(cmd: string): EventCommandExecuted {
-  return {
-    type: "command.executed",
-    properties: { sessionID: "ses_1", name: "bash", arguments: cmd },
-  } as unknown as EventCommandExecuted
-}
+
 
 describe("disabled logs", () => {
   test("suppresses OTLP logs while leaving metrics enabled", async () => {
@@ -96,7 +90,7 @@ describe("disabled logs", () => {
     await handleMessagePartUpdated(makeToolPartUpdated("running"), ctx)
     await handleMessagePartUpdated(makeToolPartUpdated("completed"), ctx)
     handlePermissionReplied(makePermissionReplied(), ctx)
-    handleCommandExecuted(makeCommandExecuted("git commit -m 'test'"), ctx)
+    handleToolResult("bash", { command: "git commit -m 'test'", description: "Commit test" }, "ses_1", ctx)
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     expect(logger.records).toHaveLength(0)
   })
