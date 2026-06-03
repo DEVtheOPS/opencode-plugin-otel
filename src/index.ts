@@ -137,6 +137,30 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     await Promise.allSettled([meterProvider.shutdown(), loggerProvider.shutdown(), tracerProvider.shutdown()])
   }
 
+  /**
+   * Push every pending metric/log/span to the OTLP endpoint right away.
+   *
+   * Exporters are periodic (default 5s), so a session shorter than one
+   * interval would otherwise hold all its telemetry in memory when the
+   * host kills the process (e.g. the GitHub action kills `opencode serve`
+   * as soon as the chat returns). The SIGTERM/beforeExit handlers can't
+   * cover that case reliably — they start an async export the runtime may
+   * not wait for — so we flush while the process is still healthy.
+   */
+  async function flushAll(reason: string) {
+    const results = await Promise.allSettled([
+      meterProvider.forceFlush(),
+      loggerProvider.forceFlush(),
+      tracerProvider.forceFlush(),
+    ])
+    const failed = results.filter((r) => r.status === "rejected").length
+    if (failed > 0) {
+      await log("warn", "otel: flush incomplete", { reason, failed })
+    } else {
+      await log("debug", "otel: flushed", { reason })
+    }
+  }
+
   process.on("SIGTERM", () => { shutdown().then(() => process.exit(0)).catch(() => process.exit(1)) })
   process.on("SIGINT",  () => { shutdown().then(() => process.exit(0)).catch(() => process.exit(1)) })
   process.on("beforeExit", () => { shutdown().catch(() => {}) })
@@ -217,9 +241,13 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
           break
         case "session.idle":
           handleSessionIdle(event as EventSessionIdle, ctx)
+          // Sessions shorter than one export interval lose all telemetry
+          // if the host kills the process right after idle — flush now.
+          await flushAll("session.idle")
           break
         case "session.error":
           handleSessionError(event as EventSessionError, ctx)
+          await flushAll("session.error")
           break
         case "session.status":
           handleSessionStatus(event as EventSessionStatus, ctx)
