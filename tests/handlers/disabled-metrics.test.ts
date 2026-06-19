@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test"
 import { handleSessionCreated, handleSessionIdle, handleSessionStatus } from "../../src/handlers/session.ts"
 import { handleMessageUpdated, handleMessagePartUpdated } from "../../src/handlers/message.ts"
 import { handleSessionDiff, handleCommandExecuted } from "../../src/handlers/activity.ts"
+import { handleCommandExecuteBefore } from "../../src/handlers/skill.ts"
 import { makeCtx } from "../helpers.ts"
 import type { EventSessionCreated, EventSessionIdle, EventSessionStatus, EventMessageUpdated, EventMessagePartUpdated, EventSessionDiff, EventCommandExecuted } from "@opencode-ai/sdk"
 
@@ -226,13 +227,35 @@ describe("OPENCODE_DISABLE_METRICS", () => {
     })
   })
 
+  describe("skill.count disabled", () => {
+    test("does not increment skill counter", async () => {
+      const { ctx, counters } = makeCtx("proj_test", ["skill.count"])
+      await handleCommandExecuteBefore(
+        { command: "review", sessionID: "ses_1", arguments: "args" },
+        ctx,
+        async () => ({ name: "review" }),
+      )
+      expect(counters.skill.calls).toHaveLength(0)
+    })
+
+    test("still emits skill_invoked log record", async () => {
+      const { ctx, logger } = makeCtx("proj_test", ["skill.count"])
+      await handleCommandExecuteBefore(
+        { command: "review", sessionID: "ses_1", arguments: "args" },
+        ctx,
+        async () => ({ name: "review" }),
+      )
+      expect(logger.records.some((record) => record.body === "skill_invoked")).toBe(true)
+    })
+  })
+
   describe("multiple disabled at once", () => {
     test("disabling all metrics stops all counter/histogram calls", async () => {
       const all = [
         "session.count", "token.usage", "cost.usage", "lines_of_code.count",
         "commit.count", "tool.duration", "cache.count", "session.duration",
         "message.count", "session.token.total", "session.cost.total",
-        "model.usage", "retry.count", "subtask.count",
+        "model.usage", "retry.count", "subtask.count", "skill.count",
       ]
       const { ctx, counters, histograms, gauges } = makeCtx("proj_test", all)
       const subtaskEvent = {
@@ -251,6 +274,11 @@ describe("OPENCODE_DISABLE_METRICS", () => {
       await handleMessagePartUpdated(makeToolPart("running"), ctx)
       await handleMessagePartUpdated(makeToolPart("completed"), ctx)
       await handleMessagePartUpdated(subtaskEvent, ctx)
+      await handleCommandExecuteBefore(
+        { command: "review", sessionID: "ses_1", arguments: "args" },
+        ctx,
+        async () => ({ name: "review" }),
+      )
 
       expect(counters.session.calls).toHaveLength(0)
       expect(counters.token.calls).toHaveLength(0)
@@ -262,6 +290,7 @@ describe("OPENCODE_DISABLE_METRICS", () => {
       expect(counters.lines.calls).toHaveLength(0)
       expect(counters.commit.calls).toHaveLength(0)
       expect(counters.subtask.calls).toHaveLength(0)
+      expect(counters.skill.calls).toHaveLength(0)
       expect(histograms.tool.calls).toHaveLength(0)
       expect(histograms.sessionDuration.calls).toHaveLength(0)
       expect(gauges.sessionToken.calls).toHaveLength(0)
