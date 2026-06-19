@@ -47,6 +47,7 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 | `opencode.session.cost.total` | Histogram | Total cost per session in USD, recorded on idle |
 | `opencode.model.usage` | Counter | Messages per model and provider |
 | `opencode.retry.count` | Counter | API retries observed via `session.status` events |
+| `opencode.skill.count` | Counter | Skill invocations observed through command aliases or the native skill tool |
 
 ### Log events
 
@@ -60,6 +61,7 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 | `api_error` | Failed assistant message (error summary, duration) |
 | `tool_result` | Tool completed or errored (duration, success, output size) |
 | `tool_decision` | Permission prompt answered (accept/reject) |
+| `skill_invoked` | Skill invoked (includes skill name, invocation type, command or tool name, optional agent/subtask metadata, and command argument length when available) |
 | `commit` | Git commit detected |
 
 ## Installation
@@ -165,7 +167,7 @@ Disabling a metric only stops the counter/histogram from being incremented — t
 export OPENCODE_DISABLE_METRICS="retry.count"
 
 # Disable multiple metrics
-export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.total,session.cost.total,model.usage,retry.count,message.count"
+export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.total,session.cost.total,model.usage,retry.count,message.count,skill.count"
 
 # Disable the new per-session cumulative gauge while keeping the delta counter
 export OPENCODE_DISABLE_METRICS="lines_of_code.total"
@@ -176,7 +178,7 @@ export OPENCODE_DISABLE_METRICS="lines_of_code.total"
 The following metrics are specific to opencode and have no equivalent in Claude Code's built-in monitoring. If you are using a Claude Code dashboard and want to avoid cluttering it with opencode-only metrics, you can disable them:
 
 ```bash
-export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.total,session.cost.total,model.usage,retry.count,message.count"
+export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.total,session.cost.total,model.usage,retry.count,message.count,skill.count"
 ```
 
 | Metric suffix | Why it's opencode-only |
@@ -188,6 +190,7 @@ export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.tota
 | `model.usage` | Per-model message counter — not emitted by Claude Code |
 | `retry.count` | API retry counter — not emitted by Claude Code |
 | `message.count` | Completed message counter — not emitted by Claude Code |
+| `skill.count` | OpenCode skill usage counter — not emitted by Claude Code |
 
 ### Disabling OTLP logs
 

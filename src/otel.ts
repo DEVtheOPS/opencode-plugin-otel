@@ -209,5 +209,9 @@ export function createInstruments(prefix: string): Instruments {
       unit: "{subtask}",
       description: "Number of sub-agent invocations observed via subtask message parts",
     }),
+    skillCounter: meter.createCounter(`${prefix}skill.count`, {
+      unit: "{skill}",
+      description: "Number of skill invocations observed via command execution and native skill tool hooks",
+    }),
   }
 }

@@ -1,5 +1,5 @@
 import type { HandlerContext, Instruments } from "../src/types.ts"
-import type { LogRecord } from "@opentelemetry/api-logs"
+import { SeverityNumber, type LogRecord } from "@opentelemetry/api-logs"
 import type { Counter, Gauge, Histogram, Span, SpanOptions, Tracer, Context, SpanContext, SpanStatus, Attributes } from "@opentelemetry/api"
 import { ROOT_CONTEXT, SpanStatusCode, trace } from "@opentelemetry/api"
 
@@ -133,6 +133,7 @@ export type MockContext = {
     modelUsage: SpyCounter
     retry: SpyCounter
     subtask: SpyCounter
+    skill: SpyCounter
   }
   histograms: {
     tool: SpyHistogram
@@ -159,6 +160,7 @@ export function makeCtx(projectID = "proj_test", disabledMetrics: string[] = [],
   const modelUsage = makeCounter()
   const retry = makeCounter()
   const subtask = makeCounter()
+  const skill = makeCounter()
   const toolHistogram = makeHistogram()
   const sessionDurationHistogram = makeHistogram()
   const sessionTokenGauge = makeHistogram()
@@ -184,6 +186,7 @@ export function makeCtx(projectID = "proj_test", disabledMetrics: string[] = [],
     modelUsageCounter: modelUsage as unknown as Counter,
     retryCounter: retry as unknown as Counter,
     subtaskCounter: subtask as unknown as Counter,
+    skillCounter: skill as unknown as Counter,
   }
 
   const ctx: HandlerContext = {
@@ -192,6 +195,7 @@ export function makeCtx(projectID = "proj_test", disabledMetrics: string[] = [],
       if (!logsEnabled) return
       logger.emit(record)
     },
+    logSeverity: { info: SeverityNumber.INFO, error: SeverityNumber.ERROR },
     instruments,
     commonAttrs: { "project.id": projectID },
     pendingToolSpans: new Map(),
@@ -211,7 +215,7 @@ export function makeCtx(projectID = "proj_test", disabledMetrics: string[] = [],
 
   return {
     ctx,
-    counters: { session, token, cost, lines, commit, cache, message, modelUsage, retry, subtask },
+    counters: { session, token, cost, lines, commit, cache, message, modelUsage, retry, subtask, skill },
     histograms: { tool: toolHistogram, sessionDuration: sessionDurationHistogram },
     gauges: { sessionToken: sessionTokenGauge, sessionCost: sessionCostGauge, linesTotal: linesTotalGauge },
     logger,
