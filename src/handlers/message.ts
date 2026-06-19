@@ -29,6 +29,7 @@ import {
 } from "@arizeai/openinference-semantic-conventions"
 import { errorSummary, setBoundedMap, accumulateSessionTotals, isMetricEnabled, isTraceEnabled } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
+import { recordSkillInvocation, skillNameFromToolInput } from "./skill.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 const LLM_FINISH_REASON = "llm.finish_reason"
@@ -251,8 +252,17 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
   if (part.type === "tool") {
     const toolPart = part as ToolPart
     const key = `${toolPart.sessionID}:${toolPart.callID}`
+    const isSkillTool = toolPart.tool === "skill"
 
     if (toolPart.state.status === "running") {
+      if (isSkillTool && !ctx.pendingToolSpans.has(key)) {
+        recordSkillInvocation({
+          sessionID: toolPart.sessionID,
+          skillName: skillNameFromToolInput(toolPart.state.input),
+          invocationType: "tool",
+          toolName: toolPart.tool,
+        }, ctx)
+      }
       const toolSpan = isTraceEnabled("tool", ctx)
         ? (() => {
             const sessionSpan = ctx.sessionSpans.get(toolPart.sessionID)
@@ -294,6 +304,14 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
 
     const pending = ctx.pendingToolSpans.get(key)
     ctx.pendingToolSpans.delete(key)
+    if (isSkillTool && !pending) {
+      recordSkillInvocation({
+        sessionID: toolPart.sessionID,
+        skillName: skillNameFromToolInput(toolPart.state.input),
+        invocationType: "tool",
+        toolName: toolPart.tool,
+      }, ctx)
+    }
     const start = pending?.startMs ?? toolPart.state.time.start
     const end = toolPart.state.time.end
     if (end === undefined) return

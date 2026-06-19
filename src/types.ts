@@ -20,6 +20,12 @@ export type PluginLogger = (
 /** OTel resource attributes common to every emitted log and metric. */
 export type CommonAttrs = { readonly "project.id": string }
 
+/** Severity numbers supplied by the plugin entrypoint so handlers do not import log globals. */
+export type LogSeverity = {
+  info: NonNullable<LogRecord["severityNumber"]>
+  error: NonNullable<LogRecord["severityNumber"]>
+}
+
 /** In-flight tool execution tracked between `running` and `completed`/`error` part updates. */
 export type PendingToolSpan = {
   tool: string
@@ -52,6 +58,7 @@ export type Instruments = {
   modelUsageCounter: Counter
   retryCounter: Counter
   subtaskCounter: Counter
+  skillCounter: Counter
 }
 
 /** Accumulated per-session totals used for gauge snapshots on session.idle. */
@@ -67,6 +74,7 @@ export type SessionTotals = {
 export type HandlerContext = {
   log: PluginLogger
   emitLog: (record: LogRecord) => void
+  logSeverity: LogSeverity
   instruments: Instruments
   commonAttrs: CommonAttrs
   pendingToolSpans: Map<string, PendingToolSpan>

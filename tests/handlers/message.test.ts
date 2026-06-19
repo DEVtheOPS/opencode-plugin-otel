@@ -83,7 +83,7 @@ function makeIncompleteAssistantMessage(): EventMessageUpdated {
 
 function makeToolPartUpdated(
   status: "running" | "completed" | "error",
-  overrides: { sessionID?: string; callID?: string; tool?: string; startMs?: number; endMs?: number } = {},
+  overrides: { sessionID?: string; callID?: string; tool?: string; startMs?: number; endMs?: number; input?: unknown } = {},
 ): EventMessagePartUpdated {
   const sessionID = overrides.sessionID ?? "ses_1"
   const callID = overrides.callID ?? "call_1"
@@ -92,10 +92,10 @@ function makeToolPartUpdated(
 
   const state =
     status === "running"
-      ? { status: "running", time: { start } }
+      ? { status: "running", time: { start }, input: overrides.input }
       : status === "completed"
-        ? { status: "completed", time: { start, end }, output: "result output" }
-        : { status: "error", time: { start, end }, error: "tool failed" }
+        ? { status: "completed", time: { start, end }, input: overrides.input, output: "result output" }
+        : { status: "error", time: { start, end }, input: overrides.input, error: "tool failed" }
 
   return {
     type: "message.part.updated",
@@ -291,6 +291,67 @@ describe("handleMessagePartUpdated", () => {
     expect(record.attributes?.["success"]).toBe(false)
     expect(record.attributes?.["error"]).toBe("tool failed")
     expect(pluginLog.calls.find(c => c.level === "error")?.level).toBe("error")
+  })
+
+  test("counts native skill tool loads on running", async () => {
+    const { ctx, counters, logger } = makeCtx()
+
+    await handleMessagePartUpdated(makeToolPartUpdated("running", {
+      tool: "skill",
+      input: { skill: "review" },
+    }), ctx)
+
+    expect(counters.skill.calls).toHaveLength(1)
+    expect(counters.skill.calls[0]!.attrs).toEqual({
+      "project.id": "proj_test",
+      "session.id": "ses_1",
+      skill_name: "review",
+      invocation_type: "tool",
+      tool_name: "skill",
+    })
+    expect(logger.records.some((record) => record.body === "skill_invoked")).toBe(true)
+  })
+
+  test("counts completed native skill tool load if running was missed", async () => {
+    const { ctx, counters } = makeCtx()
+
+    await handleMessagePartUpdated(makeToolPartUpdated("completed", {
+      tool: "skill",
+      input: { skillName: "review" },
+    }), ctx)
+
+    expect(counters.skill.calls).toHaveLength(1)
+    expect(counters.skill.calls[0]!.attrs["skill_name"]).toBe("review")
+  })
+
+  test("does not double-count native skill tool completion after running", async () => {
+    const { ctx, counters } = makeCtx()
+
+    await handleMessagePartUpdated(makeToolPartUpdated("running", {
+      tool: "skill",
+      input: { skill: "review" },
+    }), ctx)
+    await handleMessagePartUpdated(makeToolPartUpdated("completed", {
+      tool: "skill",
+      input: { skill: "review" },
+    }), ctx)
+
+    expect(counters.skill.calls).toHaveLength(1)
+  })
+
+  test("does not double-count repeated running updates for the same native skill tool call", async () => {
+    const { ctx, counters } = makeCtx()
+
+    await handleMessagePartUpdated(makeToolPartUpdated("running", {
+      tool: "skill",
+      input: { skill: "review" },
+    }), ctx)
+    await handleMessagePartUpdated(makeToolPartUpdated("running", {
+      tool: "skill",
+      input: { skill: "review" },
+    }), ctx)
+
+    expect(counters.skill.calls).toHaveLength(1)
   })
 
   test("removes entry from pendingToolSpans after completion", async () => {

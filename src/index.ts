@@ -25,6 +25,7 @@ import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSess
 import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "./handlers/message.ts"
 import { handlePermissionUpdated, handlePermissionReplied } from "./handlers/permission.ts"
 import { handleSessionDiff, handleCommandExecuted } from "./handlers/activity.ts"
+import { createSkillCommandResolver, handleCommandExecuteBefore } from "./handlers/skill.ts"
 
 const PLUGIN_VERSION: string = (pkg as { version?: string }).version ?? "unknown"
 
@@ -33,7 +34,7 @@ const PLUGIN_VERSION: string = (pkg as { version?: string }).version ?? "unknown
  * Instruments metrics (sessions, tokens, cost, lines of code, commits, tool durations)
  * and structured log events. All instrumentation is gated on `OPENCODE_ENABLE_TELEMETRY`.
  */
-export const OtelPlugin: Plugin = async ({ project, client, directory, worktree }) => {
+export const OtelPlugin: Plugin = async ({ project, client, directory, worktree, serverUrl }) => {
   const config = loadConfig()
   const otlpHeadersHelper = resolveHelperPath(config.otlpHeadersHelper, directory, worktree)
   let minLevel: Level = "info"
@@ -123,6 +124,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
   const ctx: HandlerContext = {
     log,
     emitLog,
+    logSeverity: { info: SeverityNumber.INFO, error: SeverityNumber.ERROR },
     instruments,
     commonAttrs,
     pendingToolSpans,
@@ -139,6 +141,8 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     sessionInputs,
     messageOutputs,
   }
+  const skillCommands = createSkillCommandResolver({ client, serverUrl, directory, log })
+  await skillCommands.refresh(true)
 
   async function shutdown() {
     await Promise.allSettled([meterProvider.shutdown(), loggerProvider.shutdown(), tracerProvider.shutdown()])
@@ -215,6 +219,10 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
           ...commonAttrs,
         },
       })
+    }),
+
+    "command.execute.before": safe("command.execute.before", async (input) => {
+      await handleCommandExecuteBefore(input, ctx, skillCommands.resolve)
     }),
 
     event: safe("event", async ({ event }) => {
