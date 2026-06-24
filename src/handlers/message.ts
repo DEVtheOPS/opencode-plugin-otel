@@ -453,3 +453,30 @@ export function startMessageSpan(
   )
   setBoundedMap(ctx.messageSpans, msgKey, msgSpan)
 }
+
+/**
+ * Initialises or updates the per-session agent metadata when a new user prompt
+ * arrives. Creates a fresh `SessionTotals` entry if none exists for this session
+ * (e.g. the session was started before the current plugin process). Updates the
+ * agent name on subsequent messages within the same session.
+ */
+export function handleChatMessage(
+  sessionID: string,
+  agent: string | undefined,
+  ctx: Pick<HandlerContext, "sessionTotals">,
+) {
+  const agentName = agent ?? "unknown"
+  const totals = ctx.sessionTotals.get(sessionID)
+  if (totals) {
+    if (agent) totals.agent = agentName
+  } else {
+    ctx.sessionTotals.set(sessionID, {
+      startMs: Date.now(),
+      tokens: 0,
+      cost: 0,
+      messages: 0,
+      agent: agentName,
+      agentType: "primary",
+    })
+  }
+}

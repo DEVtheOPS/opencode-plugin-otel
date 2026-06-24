@@ -22,7 +22,7 @@ import { probeEndpoint } from "./probe.ts"
 import { setupOtel, createInstruments } from "./otel.ts"
 import { remoteParentContext } from "./trace-context.ts"
 import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus } from "./handlers/session.ts"
-import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "./handlers/message.ts"
+import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan, handleChatMessage } from "./handlers/message.ts"
 import { handlePermissionUpdated, handlePermissionReplied } from "./handlers/permission.ts"
 import { handleSessionDiff, handleCommandExecuted } from "./handlers/activity.ts"
 import { agentAttrs, getSessionAgentMeta } from "./util.ts"
@@ -183,13 +183,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
 
     "chat.message": safe("chat.message", async (input, output) => {
       const agent = input.agent ?? "unknown"
-      let totals = sessionTotals.get(input.sessionID)
-      if (totals) {
-        if (input.agent) totals.agent = input.agent
-      } else {
-        totals = { startMs: Date.now(), tokens: 0, cost: 0, messages: 0, agent, agentType: "primary" }
-        sessionTotals.set(input.sessionID, totals)
-      }
+      handleChatMessage(input.sessionID, input.agent, ctx)
       const { agentType } = getSessionAgentMeta(input.sessionID, ctx)
       const sessionSpan = sessionSpans.get(input.sessionID)
       if (sessionSpan) sessionSpan.setAttributes({ [AGENT_NAME]: agent, "agent.type": agentType })

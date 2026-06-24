@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test"
-import { handleMessageUpdated, handleMessagePartUpdated } from "../../src/handlers/message.ts"
+import { handleMessageUpdated, handleMessagePartUpdated, handleChatMessage } from "../../src/handlers/message.ts"
 import { makeCtx } from "../helpers.ts"
 import type { EventMessageUpdated, EventMessagePartUpdated } from "@opencode-ai/sdk"
 
@@ -236,6 +236,40 @@ describe("handleMessageUpdated", () => {
       ctx,
     )
     expect(logger.records.at(0)!.timestamp).toBe(5000)
+  })
+})
+
+describe("handleChatMessage", () => {
+  test("creates sessionTotals entry with agent when none exists", () => {
+    const { ctx } = makeCtx()
+    handleChatMessage("ses_no_totals", "build", ctx)
+    const totals = ctx.sessionTotals.get("ses_no_totals")!
+    expect(totals.agent).toBe("build")
+    expect(totals.agentType).toBe("primary")
+    expect(totals.tokens).toBe(0)
+    expect(totals.cost).toBe(0)
+    expect(totals.messages).toBe(0)
+    expect(totals.startMs).toBeGreaterThan(0)
+  })
+
+  test("defaults agent to 'unknown' when agent is undefined", () => {
+    const { ctx } = makeCtx()
+    handleChatMessage("ses_no_agent", undefined, ctx)
+    expect(ctx.sessionTotals.get("ses_no_agent")!.agent).toBe("unknown")
+  })
+
+  test("updates agent on existing entry", () => {
+    const { ctx } = makeCtx()
+    ctx.sessionTotals.set("ses_1", { startMs: 1000, tokens: 100, cost: 0.01, messages: 1, agent: "build", agentType: "primary" })
+    handleChatMessage("ses_1", "plan", ctx)
+    expect(ctx.sessionTotals.get("ses_1")!.agent).toBe("plan")
+  })
+
+  test("does not override agent with 'unknown' on existing entry when called without agent", () => {
+    const { ctx } = makeCtx()
+    ctx.sessionTotals.set("ses_1", { startMs: 1000, tokens: 100, cost: 0.01, messages: 1, agent: "build", agentType: "primary" })
+    handleChatMessage("ses_1", undefined, ctx)
+    expect(ctx.sessionTotals.get("ses_1")!.agent).toBe("build")
   })
 })
 
