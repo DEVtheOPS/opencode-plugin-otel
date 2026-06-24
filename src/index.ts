@@ -183,9 +183,14 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
 
     "chat.message": safe("chat.message", async (input, output) => {
       const agent = input.agent ?? "unknown"
+      let totals = sessionTotals.get(input.sessionID)
+      if (totals) {
+        if (input.agent) totals.agent = input.agent
+      } else {
+        totals = { startMs: Date.now(), tokens: 0, cost: 0, messages: 0, agent, agentType: "primary" }
+        sessionTotals.set(input.sessionID, totals)
+      }
       const { agentType } = getSessionAgentMeta(input.sessionID, ctx)
-      const totals = sessionTotals.get(input.sessionID)
-      if (totals) totals.agent = agent
       const sessionSpan = sessionSpans.get(input.sessionID)
       if (sessionSpan) sessionSpan.setAttributes({ [AGENT_NAME]: agent, "agent.type": agentType })
       const promptText = output.parts.map((part) => {
