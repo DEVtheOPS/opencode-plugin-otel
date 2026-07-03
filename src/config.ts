@@ -13,6 +13,7 @@ const TRACE_DISABLE_ALL_VALUES = new Set(["all", "*", "true", "1"])
 export type PluginConfig = {
   enabled: boolean
   logsEnabled: boolean
+  capturePromptInLogs: boolean
   endpoint: string
   protocol: "grpc" | "http/protobuf" | "http/json"
   metricsInterval: number
@@ -55,6 +56,7 @@ export function parseAttributePairs(raw: string | undefined): Record<string, str
 export type OtelPluginOptions = {
   enabled?: boolean
   logsEnabled?: boolean
+  capturePromptInLogs?: boolean
   endpoint?: string
   protocol?: "grpc" | "http/protobuf" | "http/json"
   metricsInterval?: number
@@ -185,6 +187,7 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
   return {
     enabled: pickBoolean(resolvedOptions.enabled) ?? hasNonEmptyEnv("OPENCODE_ENABLE_TELEMETRY"),
     logsEnabled: pickBoolean(resolvedOptions.logsEnabled) ?? !hasNonEmptyEnv("OPENCODE_DISABLE_LOGS"),
+    capturePromptInLogs: pickBoolean(resolvedOptions.capturePromptInLogs) ?? hasNonEmptyEnv("OPENCODE_CAPTURE_PROMPT_IN_LOGS"),
     endpoint: pickString(resolvedOptions.endpoint) ?? process.env["OPENCODE_OTLP_ENDPOINT"] ?? "http://localhost:4317",
     protocol,
     metricsInterval: pickPositiveInt(resolvedOptions.metricsInterval) ?? parseEnvInt("OPENCODE_OTLP_METRICS_INTERVAL", 60000),
