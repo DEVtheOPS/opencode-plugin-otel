@@ -16,7 +16,7 @@ export function errorSummary(err: { name: string; data?: unknown } | undefined):
  * has reached `MAX_PENDING` capacity to prevent unbounded memory growth.
  */
 export function setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V) {
-  if (map.size >= MAX_PENDING) {
+  if (!map.has(key) && map.size >= MAX_PENDING) {
     const [firstKey] = map.keys()
     if (firstKey !== undefined) map.delete(firstKey)
   }
