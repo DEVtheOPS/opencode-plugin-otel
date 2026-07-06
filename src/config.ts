@@ -27,6 +27,7 @@ export type PluginConfig = {
   metricsTemporality: MetricsTemporality | undefined
   disabledMetrics: Set<string>
   disabledTraces: Set<string>
+  longRunningSessionSpans: boolean
 }
 
 export function parseAttributePairs(raw: string | undefined): Record<string, string> {
@@ -69,6 +70,7 @@ export type OtelPluginOptions = {
   metricsTemporality?: MetricsTemporality
   disabledMetrics?: string[]
   disabledTraces?: string[]
+  longRunningSessionSpans?: boolean
 }
 
 const VALID_PROTOCOLS = new Set<PluginConfig["protocol"]>(["grpc", "http/protobuf", "http/json"])
@@ -199,6 +201,7 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
     metricsTemporality,
     disabledMetrics,
     disabledTraces,
+    longRunningSessionSpans: pickBoolean(resolvedOptions.longRunningSessionSpans) ?? hasNonEmptyEnv("OPENCODE_LONG_RUNNING_SESSION_SPANS"),
   }
 }
 

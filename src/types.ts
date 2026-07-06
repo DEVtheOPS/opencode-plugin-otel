@@ -87,6 +87,7 @@ export type HandlerContext = {
   sessionDiffTotals: Map<string, { additions: number; deletions: number }>
   disabledMetrics: Set<string>
   disabledTraces: Set<string>
+  longRunningSessionSpans: boolean
   tracer: Tracer
   tracePrefix: string
   rootContext: () => Context

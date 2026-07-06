@@ -177,6 +177,7 @@ export function makeCtx(
   disabledTraces: string[] = [],
   logsEnabled = true,
   extraCommonAttrs: Record<string, string> = {},
+  longRunningSessionSpans = false,
 ): MockContext {
   const session = makeCounter()
   const token = makeCounter()
@@ -229,6 +230,7 @@ export function makeCtx(
     sessionDiffTotals: new Map(),
     disabledMetrics: new Set(disabledMetrics),
     disabledTraces: new Set(disabledTraces),
+    longRunningSessionSpans,
     tracer: tracer as unknown as Tracer,
     tracePrefix: "opencode.",
     rootContext: () => ROOT_CONTEXT,
