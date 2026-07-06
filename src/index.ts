@@ -181,6 +181,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
       if (totals) {
         sessionSpan.setAttributes({
           [AGENT_NAME]: totals.agent,
+          "agent.type": totals.agentType,
           "session.total_tokens": totals.tokens,
           "session.total_cost_usd": totals.cost,
           "session.total_messages": totals.messages,

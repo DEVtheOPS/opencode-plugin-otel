@@ -184,6 +184,26 @@ describe("handleSessionDeleted", () => {
     expect(span.ended).toBe(true)
     expect(ctx.sessionSpans.has("ses_1")).toBe(false)
   })
+
+  test("sets agent.type on the session span from the last known totals", async () => {
+    const { ctx, tracer } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1", 1000, "ses_parent"), ctx)
+    ctx.sessionTotals.set("ses_1", { startMs: 1000, tokens: 10, cost: 0.01, messages: 1, agent: "review", agentType: "subagent" })
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    const span = tracer.spans[0]!
+    expect(span.attributes["agent.type"]).toBe("subagent")
+  })
+
+  test("emits session.deleted log record", async () => {
+    const { ctx, logger } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1", 1000, "ses_parent"), ctx)
+    ctx.sessionTotals.set("ses_1", { startMs: 1000, tokens: 10, cost: 0.01, messages: 1, agent: "review", agentType: "subagent" })
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    const record = logger.records.find(r => r.body === "session.deleted")
+    expect(record).toBeDefined()
+    expect(record!.attributes?.["session.id"]).toBe("ses_1")
+    expect(record!.attributes?.["agent"]).toBe("review")
+  })
 })
 
 describe("handleSessionError", () => {

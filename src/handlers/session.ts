@@ -247,6 +247,8 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
 export function handleSessionDeleted(e: EventSessionDeleted, ctx: HandlerContext) {
   const sessionID = e.properties.info.id
   const totals = ctx.sessionTotals.get(sessionID)
+  const agentName = totals?.agent ?? "unknown"
+  const agentType = totals?.agentType ?? "unknown"
   ctx.sessionTotals.delete(sessionID)
   ctx.sessionDiffTotals.delete(sessionID)
   sweepSession(sessionID, ctx)
@@ -256,6 +258,7 @@ export function handleSessionDeleted(e: EventSessionDeleted, ctx: HandlerContext
     if (totals) {
       sessionSpan.setAttributes({
         [AGENT_NAME]: totals.agent,
+        "agent.type": totals.agentType,
         "session.total_tokens": totals.tokens,
         "session.total_cost_usd": totals.cost,
         "session.total_messages": totals.messages,
@@ -266,6 +269,19 @@ export function handleSessionDeleted(e: EventSessionDeleted, ctx: HandlerContext
     ctx.sessionSpans.delete(sessionID)
   }
 
+  ctx.emitLog({
+    severityNumber: SeverityNumber.INFO,
+    severityText: "INFO",
+    timestamp: Date.now(),
+    observedTimestamp: Date.now(),
+    body: "session.deleted",
+    attributes: {
+      "event.name": "session.deleted",
+      "session.id": sessionID,
+      ...agentAttrs(agentName, agentType),
+      ...ctx.commonAttrs,
+    },
+  })
   ctx.log("debug", "otel: session.deleted", { sessionID })
 }
 
