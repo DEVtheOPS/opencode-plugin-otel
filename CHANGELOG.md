@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [1.3.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.2.2...v1.3.0) (2026-07-06)
+
+
+### Features
+
+* **config:** support plugin tuple options ([f8be232](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/f8be2328642beb50b093a52477e8621aa07f76ba))
+
 ## [1.2.2](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.2.1...v1.2.2) (2026-07-02)
 
 
