@@ -100,4 +100,6 @@ export type HandlerContext = {
   sessionSpanContexts: Map<string, SpanContext>
   messageSpans: Map<string, Span>
   messageOutputs: Map<string, string>
+  outboundHeaders: Record<string, string>
+  outboundEndpoints: string[]
 }

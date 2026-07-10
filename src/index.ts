@@ -25,6 +25,7 @@ import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSess
 import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "./handlers/message.ts"
 import { handlePermissionUpdated, handlePermissionReplied } from "./handlers/permission.ts"
 import { handleSessionDiff, handleCommandExecuted } from "./handlers/activity.ts"
+import { handleChatHeaders } from "./handlers/chat-headers.ts"
 import { agentAttrs, getSessionAgentMeta, setBoundedMap } from "./util.ts"
 import type { SessionTotals } from "./types.ts"
 
@@ -157,6 +158,8 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     sessionSpanContexts,
     messageSpans,
     messageOutputs,
+    outboundHeaders: parseAttributePairs(config.outboundHeaders),
+    outboundEndpoints: config.outboundEndpoints,
   }
 
   let shuttingDown = false
@@ -205,6 +208,10 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
         }
       }
     },
+
+    "chat.headers": safe("chat.headers", async (input, output) => {
+      handleChatHeaders(input, output, ctx)
+    }),
 
     "chat.message": safe("chat.message", async (input, output) => {
       const agent = input.agent ?? "unknown"

@@ -27,6 +27,8 @@ export type PluginConfig = {
   metricsTemporality: MetricsTemporality | undefined
   disabledMetrics: Set<string>
   disabledTraces: Set<string>
+  outboundHeaders: string | undefined
+  outboundEndpoints: string[]
 }
 
 export function parseAttributePairs(raw: string | undefined): Record<string, string> {
@@ -69,6 +71,8 @@ export type OtelPluginOptions = {
   metricsTemporality?: MetricsTemporality
   disabledMetrics?: string[]
   disabledTraces?: string[]
+  outboundHeaders?: string
+  outboundEndpoints?: string[]
 }
 
 const VALID_PROTOCOLS = new Set<PluginConfig["protocol"]>(["grpc", "http/protobuf", "http/json"])
@@ -182,6 +186,10 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
   const optionTraces = pickStringList(resolvedOptions.disabledTraces)
   const disabledTraces = expandDisabledTraces(optionTraces ?? splitList(process.env["OPENCODE_DISABLE_TRACES"]))
 
+  const outboundHeaders = pickString(resolvedOptions.outboundHeaders) ?? process.env["OPENCODE_OUTBOUND_HEADERS"]
+  const optionEndpoints = pickStringList(resolvedOptions.outboundEndpoints)
+  const outboundEndpoints = normalizeList(optionEndpoints ?? splitList(process.env["OPENCODE_OUTBOUND_ENDPOINTS"]))
+
   return {
     enabled: pickBoolean(resolvedOptions.enabled) ?? hasNonEmptyEnv("OPENCODE_ENABLE_TELEMETRY"),
     logsEnabled: pickBoolean(resolvedOptions.logsEnabled) ?? !hasNonEmptyEnv("OPENCODE_DISABLE_LOGS"),
@@ -199,6 +207,8 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
     metricsTemporality,
     disabledMetrics,
     disabledTraces,
+    outboundHeaders,
+    outboundEndpoints,
   }
 }
 

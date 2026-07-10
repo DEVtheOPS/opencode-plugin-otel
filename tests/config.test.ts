@@ -75,6 +75,8 @@ describe("loadConfig", () => {
     "OPENCODE_DISABLE_METRICS",
     "OPENCODE_DISABLE_LOGS",
     "OPENCODE_DISABLE_TRACES",
+    "OPENCODE_OUTBOUND_HEADERS",
+    "OPENCODE_OUTBOUND_ENDPOINTS",
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_RESOURCE_ATTRIBUTES",
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
@@ -325,6 +327,24 @@ describe("loadConfig", () => {
     process.env["OPENCODE_DISABLE_TRACES"] = "1"
     expect(loadConfig().disabledTraces).toEqual(new Set(TRACE_TYPES))
   })
+
+  test("outboundHeaders is undefined when unset", () => {
+    expect(loadConfig().outboundHeaders).toBeUndefined()
+  })
+
+  test("reads OPENCODE_OUTBOUND_HEADERS as a raw string", () => {
+    process.env["OPENCODE_OUTBOUND_HEADERS"] = "x-enable-phoenix-tracing=true"
+    expect(loadConfig().outboundHeaders).toBe("x-enable-phoenix-tracing=true")
+  })
+
+  test("outboundEndpoints is empty when unset", () => {
+    expect(loadConfig().outboundEndpoints).toEqual([])
+  })
+
+  test("parses OPENCODE_OUTBOUND_ENDPOINTS into a trimmed list", () => {
+    process.env["OPENCODE_OUTBOUND_ENDPOINTS"] = " https://a.example.com , https://b.example.com "
+    expect(loadConfig().outboundEndpoints).toEqual(["https://a.example.com", "https://b.example.com"])
+  })
 })
 
 describe("loadConfig options", () => {
@@ -341,6 +361,8 @@ describe("loadConfig options", () => {
     "OPENCODE_DISABLE_METRICS",
     "OPENCODE_DISABLE_LOGS",
     "OPENCODE_DISABLE_TRACES",
+    "OPENCODE_OUTBOUND_HEADERS",
+    "OPENCODE_OUTBOUND_ENDPOINTS",
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_RESOURCE_ATTRIBUTES",
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
@@ -450,6 +472,17 @@ describe("loadConfig options", () => {
   test("option disabledTraces array trims and lowercases entries", () => {
     const { disabledTraces } = loadConfig({ disabledTraces: [" LLM ", "Tool"] })
     expect(disabledTraces).toEqual(new Set(["llm", "tool"]))
+  })
+
+  test("option outboundHeaders overrides the env var", () => {
+    process.env["OPENCODE_OUTBOUND_HEADERS"] = "x-env=1"
+    expect(loadConfig({ outboundHeaders: "x-option=1" }).outboundHeaders).toBe("x-option=1")
+  })
+
+  test("option outboundEndpoints trims entries and overrides the env var", () => {
+    process.env["OPENCODE_OUTBOUND_ENDPOINTS"] = "https://env.example.com"
+    expect(loadConfig({ outboundEndpoints: [" https://option.example.com "] }).outboundEndpoints)
+      .toEqual(["https://option.example.com"])
   })
 
   test("env values still apply when no options are passed", () => {

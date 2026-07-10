@@ -18,6 +18,7 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
   - [Quick start](#quick-start)
   - [Headers and resource attributes](#headers-and-resource-attributes)
   - [Dynamic headers](#dynamic-headers)
+  - [Outbound headers](#outbound-headers)
   - [Disabling specific metrics](#disabling-specific-metrics)
   - [Disabling OTLP logs (`OPENCODE_DISABLE_LOGS`)](#disabling-otlp-logs)
   - [Disabling traces (`OPENCODE_DISABLE_TRACES`)](#disabling-traces)
@@ -107,6 +108,8 @@ The environment variables (set them in your shell profile — `~/.zshrc`, `~/.ba
 | `OPENCODE_OTLP_METRICS_TEMPORALITY` | *(unset)* | Metrics aggregation temporality: `delta`, `cumulative`, or `lowmemory`. Required for Datadog (`delta`). Copied to `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`. |
 | `OPENCODE_TRACEPARENT` | *(unset)* | W3C [`traceparent`](https://www.w3.org/TR/trace-context/#traceparent-header) string. When set, all spans are parented under this remote context so opencode traces nest inside a caller's trace (e.g. a CI job). Invalid values are logged and ignored. Note: with the default `ParentBased` sampler, a value with the sampled flag off (`...-00`) suppresses all trace export. |
 | `OPENCODE_TRACESTATE` | *(unset)* | W3C [`tracestate`](https://www.w3.org/TR/trace-context/#tracestate-header) string, parsed alongside `OPENCODE_TRACEPARENT` and attached to the remote parent context. Ignored unless a valid `OPENCODE_TRACEPARENT` is also set. |
+| `OPENCODE_OUTBOUND_HEADERS` | *(unset)* | Comma-separated `key=value` headers injected into outgoing LLM requests via the `chat.headers` hook. Example: `x-enable-phoenix-tracing=true` |
+| `OPENCODE_OUTBOUND_ENDPOINTS` | *(unset)* | Comma-separated endpoint URLs. When set, outbound headers are only injected for requests whose resolved URL matches one of these by hostname. When unset, headers are sent to every provider. |
 
 ### Plugin options (opencode.json)
 
@@ -148,6 +151,8 @@ Option keys mirror the resolved config and map to the environment variables:
 | `metricsTemporality` | `OPENCODE_OTLP_METRICS_TEMPORALITY` |
 | `disabledMetrics` | `OPENCODE_DISABLE_METRICS` (array, not a comma string) |
 | `disabledTraces` | `OPENCODE_DISABLE_TRACES` (array, not a comma string) |
+| `outboundHeaders` | `OPENCODE_OUTBOUND_HEADERS` |
+| `outboundEndpoints` | `OPENCODE_OUTBOUND_ENDPOINTS` (array, not a comma string) |
 
 > **Security note:** `opencode.json` is frequently committed to version control. Keep secrets such as `otlpHeaders` in an environment variable or an opencode `{env:VAR}` substitution (e.g. `"otlpHeaders": "{env:OTEL_HEADERS}"`) rather than inline.
 
@@ -208,6 +213,22 @@ printf '{"Authorization":"Bearer %s"}' "$(get-token.sh)"
 For a Cloud Run collector using IAM authentication, `get-token.sh` might be `gcloud auth print-identity-token`.
 
 If `OPENCODE_OTLP_HEADERS` is also set, helper-provided headers override static headers with the same name. Header values are never logged.
+
+### Outbound headers
+
+`OPENCODE_OTLP_HEADERS` above controls headers sent to your *collector*. `OPENCODE_OUTBOUND_HEADERS` is separate: it injects custom headers into the outgoing *LLM* requests opencode makes, via the `chat.headers` hook. This is useful for LLM gateways that require specific headers — feature flags, routing hints, or tracing toggles such as Arize Phoenix's `x-enable-phoenix-tracing`.
+
+```bash
+export OPENCODE_OUTBOUND_HEADERS="x-enable-phoenix-tracing=true"
+```
+
+By default these headers are sent on every LLM request, including requests to third-party providers such as Anthropic and OpenAI. Use `OPENCODE_OUTBOUND_ENDPOINTS` to restrict injection to your own gateways:
+
+```bash
+export OPENCODE_OUTBOUND_ENDPOINTS="https://litellm.example.com"
+```
+
+When set, headers are only injected when the resolved request URL — `provider.options.baseURL` if you have overridden it, otherwise the provider's default `model.api.url` — matches one of the listed endpoints by hostname. Scope your endpoints if any outbound header carries a value you would not want sent to a third-party provider.
 
 ### Disabling specific metrics
 
