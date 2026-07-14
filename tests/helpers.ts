@@ -160,6 +160,7 @@ export type MockContext = {
   histograms: {
     tool: SpyHistogram
     sessionDuration: SpyHistogram
+    genaiToken: SpyHistogram
   }
   gauges: {
     sessionToken: SpyHistogram
@@ -190,6 +191,7 @@ export function makeCtx(
   const subtask = makeCounter()
   const toolHistogram = makeHistogram()
   const sessionDurationHistogram = makeHistogram()
+  const genaiTokenHistogram = makeHistogram()
   const sessionTokenGauge = makeHistogram()
   const sessionCostGauge = makeHistogram()
   const linesTotalGauge = makeGauge()
@@ -200,6 +202,7 @@ export function makeCtx(
   const instruments: Instruments = {
     sessionCounter: session as unknown as Counter,
     tokenCounter: token as unknown as Counter,
+    genaiTokenHistogram: genaiTokenHistogram as unknown as Histogram,
     costCounter: cost as unknown as Counter,
     linesCounter: lines as unknown as Counter,
     linesTotalGauge: linesTotalGauge as unknown as Gauge,
@@ -247,7 +250,7 @@ export function makeCtx(
   return {
     ctx,
     counters: { session, token, cost, lines, commit, cache, message, modelUsage, retry, subtask },
-    histograms: { tool: toolHistogram, sessionDuration: sessionDurationHistogram },
+    histograms: { tool: toolHistogram, sessionDuration: sessionDurationHistogram, genaiToken: genaiTokenHistogram },
     gauges: { sessionToken: sessionTokenGauge, sessionCost: sessionCostGauge, linesTotal: linesTotalGauge },
     logger,
     pluginLog,

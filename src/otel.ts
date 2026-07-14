@@ -156,6 +156,16 @@ export function createInstruments(prefix: string): Instruments {
       unit: "tokens",
       description: "Number of tokens used",
     }),
+    // Deliberately not prefixed: the metric name is fixed by the OTel GenAI semantic
+    // conventions, and semconv-strict backends (e.g. Splunk AI Agent Monitoring) only
+    // recognise it under this exact name and as a Histogram.
+    genaiTokenHistogram: meter.createHistogram("gen_ai.client.token.usage", {
+      unit: "{token}",
+      description: "Number of input and output tokens used, per OTel GenAI semantic conventions",
+      advice: {
+        explicitBucketBoundaries: [1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864],
+      },
+    }),
     costCounter: meter.createCounter(`${prefix}cost.usage`, {
       unit: "USD",
       description: "Cost of the opencode session in USD",
