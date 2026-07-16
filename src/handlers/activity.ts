@@ -28,14 +28,7 @@ export function handleSessionDiff(e: EventSessionDiff, ctx: HandlerContext) {
   const deltaAdded = totalAdded - prev.additions
   const deltaRemoved = totalRemoved - prev.deletions
   const nextTotals = { additions: totalAdded, deletions: totalRemoved }
-  if (ctx.sessionDiffTotals.has(sessionID)) {
-    // Existing session: update in place. Calling setBoundedMap on a full map would
-    // evict an unrelated session here, and that session's next session.diff would
-    // be treated as first-seen — reintroducing the cumulative double-count bug.
-    ctx.sessionDiffTotals.set(sessionID, nextTotals)
-  } else {
-    setBoundedMap(ctx.sessionDiffTotals, sessionID, nextTotals)
-  }
+  setBoundedMap(ctx.sessionDiffTotals, sessionID, nextTotals)
 
   const baseAttrs = { ...ctx.commonAttrs, "session.id": sessionID }
 
