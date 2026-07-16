@@ -212,19 +212,23 @@ describe("handleMessageUpdated", () => {
 
   test("emits api_request log record on success", async () => {
     const { ctx, logger } = makeCtx("proj_test", [], [], true, { team: "platform" })
-    await handleMessageUpdated(makeAssistantMessageUpdated({}), ctx)
+    await handleMessageUpdated(makeAssistantMessageUpdated({ providerID: "amazon-bedrock" }), ctx)
     expect(logger.records).toHaveLength(1)
     expect(logger.records.at(0)!.body).toBe("api_request")
+    expect(logger.records.at(0)!.attributes?.["provider"]).toBe("amazon-bedrock")
+    expect(logger.records.at(0)!.attributes?.["gen_ai.provider.name"]).toBe("aws.bedrock")
     expect(logger.records.at(0)!.attributes?.["team"]).toBe("platform")
   })
 
   test("emits api_error log record on error", async () => {
     const { ctx, logger, pluginLog } = makeCtx()
     await handleMessageUpdated(
-      makeAssistantMessageUpdated({ error: { name: "APIError" } }),
+      makeAssistantMessageUpdated({ providerID: "google-vertex", error: { name: "APIError" } }),
       ctx,
     )
     expect(logger.records.at(0)!.body).toBe("api_error")
+    expect(logger.records.at(0)!.attributes?.["provider"]).toBe("google-vertex")
+    expect(logger.records.at(0)!.attributes?.["gen_ai.provider.name"]).toBe("gcp.vertex_ai")
     expect(logger.records.at(0)!.attributes?.["error"]).toBe("APIError")
     expect(pluginLog.calls.find(c => c.level === "error")?.level).toBe("error")
   })

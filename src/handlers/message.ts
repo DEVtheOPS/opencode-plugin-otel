@@ -30,6 +30,7 @@ import {
 import {
   agentAttrs,
   errorSummary,
+  genAiProviderName,
   setBoundedMap,
   accumulateSessionTotals,
   getSessionAgentMeta,
@@ -163,6 +164,7 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
         "session.id": sessionID,
         model: modelID,
         provider: providerID,
+        "gen_ai.provider.name": genAiProviderName(providerID),
         ...agentAttrs(agentName, agentType),
         error: errorSummary(assistant.error),
         duration_ms: duration,
@@ -189,6 +191,7 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
         "session.id": sessionID,
         model: modelID,
         provider: providerID,
+        "gen_ai.provider.name": genAiProviderName(providerID),
         ...agentAttrs(agentName, agentType),
         cost_usd: assistant.cost,
         duration_ms: duration,
@@ -441,6 +444,7 @@ export function startMessageSpan(
         "agent.type": agentType,
         [LLM_SYSTEM]: providerID,
         [LLM_PROVIDER]: providerID,
+        "gen_ai.provider.name": genAiProviderName(providerID),
         [LLM_MODEL_NAME]: modelID,
         ...(inputText
           ? {
