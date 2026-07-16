@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test"
-import { errorSummary, setBoundedMap, isMetricEnabled, isTraceEnabled } from "../src/util.ts"
+import { errorSummary, genAiProviderName, setBoundedMap, isMetricEnabled, isTraceEnabled } from "../src/util.ts"
 import { MAX_PENDING } from "../src/types.ts"
 
 describe("errorSummary", () => {
@@ -23,6 +23,26 @@ describe("errorSummary", () => {
 
   test("returns name when data is a primitive", () => {
     expect(errorSummary({ name: "APIError", data: "oops" })).toBe("APIError")
+  })
+})
+
+describe("genAiProviderName", () => {
+  test.each([
+    ["amazon-bedrock", "aws.bedrock"],
+    ["azure", "azure.ai.openai"],
+    ["azure-cognitive-services", "azure.ai.openai"],
+    ["google", "gcp.gemini"],
+    ["google-vertex", "gcp.vertex_ai"],
+    ["google-vertex-anthropic", "gcp.vertex_ai"],
+    ["mistral", "mistral_ai"],
+    ["xai", "x_ai"],
+  ])("maps %s to %s", (providerID, expected) => {
+    expect(genAiProviderName(providerID)).toBe(expected)
+  })
+
+  test("preserves provider IDs without a canonical mapping", () => {
+    expect(genAiProviderName("openrouter")).toBe("openrouter")
+    expect(genAiProviderName("custom-gateway")).toBe("custom-gateway")
   })
 })
 

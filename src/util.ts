@@ -2,6 +2,17 @@ import { trace } from "@opentelemetry/api"
 import { MAX_PENDING } from "./types.ts"
 import type { HandlerContext, SessionAgentType } from "./types.ts"
 
+const GEN_AI_PROVIDER_NAMES: Readonly<Record<string, string>> = {
+  "amazon-bedrock": "aws.bedrock",
+  azure: "azure.ai.openai",
+  "azure-cognitive-services": "azure.ai.openai",
+  google: "gcp.gemini",
+  "google-vertex": "gcp.vertex_ai",
+  "google-vertex-anthropic": "gcp.vertex_ai",
+  mistral: "mistral_ai",
+  xai: "x_ai",
+}
+
 /** Returns a human-readable summary string from an opencode error object. */
 export function errorSummary(err: { name: string; data?: unknown } | undefined): string {
   if (!err) return "unknown"
@@ -9,6 +20,11 @@ export function errorSummary(err: { name: string; data?: unknown } | undefined):
     return `${err.name}: ${(err.data as { message: string }).message}`
   }
   return err.name
+}
+
+/** Returns the canonical OTel GenAI provider name, preserving unknown provider IDs. */
+export function genAiProviderName(providerID: string): string {
+  return GEN_AI_PROVIDER_NAMES[providerID] ?? providerID
 }
 
 /**

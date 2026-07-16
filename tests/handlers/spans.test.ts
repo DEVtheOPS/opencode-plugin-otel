@@ -356,11 +356,12 @@ describe("message (LLM) spans", () => {
 
   test("startMessageSpan sets OpenInference LLM attributes", () => {
     const { ctx, tracer } = makeCtx()
-    startMessageSpan("ses_1", "msg_1", "user_1", "gpt-4o", "openai", 1000, ctx)
+    startMessageSpan("ses_1", "msg_1", "user_1", "claude-sonnet-4", "amazon-bedrock", 1000, ctx)
     expect(tracer.spans[0]!.attributes[OPENINFERENCE_SPAN_KIND]).toBe(OpenInferenceSpanKind.LLM)
-    expect(tracer.spans[0]!.attributes[LLM_SYSTEM]).toBe("openai")
-    expect(tracer.spans[0]!.attributes[LLM_PROVIDER]).toBe("openai")
-    expect(tracer.spans[0]!.attributes[LLM_MODEL_NAME]).toBe("gpt-4o")
+    expect(tracer.spans[0]!.attributes[LLM_SYSTEM]).toBe("amazon-bedrock")
+    expect(tracer.spans[0]!.attributes[LLM_PROVIDER]).toBe("amazon-bedrock")
+    expect(tracer.spans[0]!.attributes["gen_ai.provider.name"]).toBe("aws.bedrock")
+    expect(tracer.spans[0]!.attributes[LLM_MODEL_NAME]).toBe("claude-sonnet-4")
   })
 
   test("startMessageSpan is a no-op when span already exists for sessionID:messageID", () => {
