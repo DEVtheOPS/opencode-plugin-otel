@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [1.3.1](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.3.0...v1.3.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **ci:** use compatible Node version for npm publish ([b01abdf](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/b01abdf5b6c4e1862ccd5ca6edc8cf552329f897))
+
 ## [1.3.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.2.2...v1.3.0) (2026-07-06)
 
 ### Features
