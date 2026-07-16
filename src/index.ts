@@ -14,7 +14,6 @@ import type {
   EventPermissionUpdated,
   EventPermissionReplied,
   EventSessionDiff,
-  EventCommandExecuted,
 } from "@opencode-ai/sdk"
 import { LEVELS, type Level, type HandlerContext } from "./types.ts"
 import { loadConfig, parseAttributePairs, resolveHelperPath, resolveLogLevel, type OtelPluginOptions } from "./config.ts"
@@ -24,7 +23,7 @@ import { remoteParentContext } from "./trace-context.ts"
 import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus, handleRunStarted } from "./handlers/session.ts"
 import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "./handlers/message.ts"
 import { handlePermissionUpdated, handlePermissionReplied } from "./handlers/permission.ts"
-import { handleSessionDiff, handleCommandExecuted } from "./handlers/activity.ts"
+import { handleSessionDiff } from "./handlers/activity.ts"
 import { agentAttrs, getSessionAgentMeta, setBoundedMap } from "./util.ts"
 import type { SessionTotals } from "./types.ts"
 
@@ -295,9 +294,6 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
           break
         case "session.diff":
           handleSessionDiff(event as EventSessionDiff, ctx)
-          break
-        case "command.executed":
-          handleCommandExecuted(event as EventCommandExecuted, ctx)
           break
         case "permission.updated":
           handlePermissionUpdated(event as EventPermissionUpdated, ctx)

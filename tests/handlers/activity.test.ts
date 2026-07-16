@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test"
-import { handleSessionDiff, handleCommandExecuted } from "../../src/handlers/activity.ts"
+import { handleSessionDiff, handleToolResult } from "../../src/handlers/activity.ts"
 import { makeCtx } from "../helpers.ts"
-import type { EventSessionDiff, EventCommandExecuted } from "@opencode-ai/sdk"
+import type { EventSessionDiff } from "@opencode-ai/sdk"
 
 function makeSessionDiff(
   sessionID: string,
@@ -14,13 +14,6 @@ function makeSessionDiff(
       diff: diffs.map((d) => ({ before: "", after: "", additions: d.additions, deletions: d.deletions, file: d.file })),
     },
   } as unknown as EventSessionDiff
-}
-
-function makeCommandExecuted(name: string, args: string, sessionID = "ses_1"): EventCommandExecuted {
-  return {
-    type: "command.executed",
-    properties: { name, arguments: args, sessionID, messageID: "msg_1" },
-  } as unknown as EventCommandExecuted
 }
 
 describe("handleSessionDiff", () => {
@@ -134,17 +127,18 @@ describe("handleSessionDiff", () => {
   })
 })
 
-describe("handleCommandExecuted", () => {
-  test("increments commit counter for git commit", () => {
+describe("handleToolResult", () => {
+  test("increments commit counter for git commit in bash command", () => {
     const { ctx, counters } = makeCtx()
-    handleCommandExecuted(makeCommandExecuted("bash", 'git commit -m "feat: add thing"'), ctx)
+    handleToolResult("bash", { command: 'git commit -m "feat: add thing"', description: "Commit changes" }, "ses_1", ctx)
     expect(counters.commit.calls).toHaveLength(1)
+    expect(counters.commit.calls.at(0)!.attrs["session.id"]).toBe("ses_1")
   })
 
   test("emits commit log record", () => {
     const { ctx, logger } = makeCtx()
     ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "build", agentType: "primary" })
-    handleCommandExecuted(makeCommandExecuted("bash", "git commit -m 'fix: bug'"), ctx)
+    handleToolResult("bash", { command: "git commit -m 'fix: bug'", description: "" }, "ses_1", ctx)
     expect(logger.records).toHaveLength(1)
     expect(logger.records.at(0)!.body).toBe("commit")
     expect(logger.records.at(0)!.attributes?.["session.id"]).toBe("ses_1")
@@ -152,33 +146,51 @@ describe("handleCommandExecuted", () => {
     expect(logger.records.at(0)!.attributes?.["agent.type"]).toBe("primary")
   })
 
-  test("ignores non-bash commands", () => {
+  test("ignores non-bash tools", () => {
     const { ctx, counters } = makeCtx()
-    handleCommandExecuted(makeCommandExecuted("python", "git commit -m foo"), ctx)
+    handleToolResult("read", { command: "git commit -m foo", description: "" }, "ses_1", ctx)
     expect(counters.commit.calls).toHaveLength(0)
   })
 
   test("ignores bash commands without git commit", () => {
     const { ctx, counters } = makeCtx()
-    handleCommandExecuted(makeCommandExecuted("bash", "npm install"), ctx)
+    handleToolResult("bash", { command: "npm install", description: "Install deps" }, "ses_1", ctx)
     expect(counters.commit.calls).toHaveLength(0)
   })
 
   test("does not match git commit-graph", () => {
     const { ctx, counters } = makeCtx()
-    handleCommandExecuted(makeCommandExecuted("bash", "git commit-graph write"), ctx)
+    handleToolResult("bash", { command: "git commit-graph write", description: "" }, "ses_1", ctx)
     expect(counters.commit.calls).toHaveLength(0)
   })
 
-  test("does not match string containing 'git commit' in echo", () => {
+  test("matches when git commit appears in echo argument", () => {
     const { ctx, counters } = makeCtx()
-    handleCommandExecuted(makeCommandExecuted("bash", 'echo "run git commit to save"'), ctx)
+    handleToolResult("bash", { command: 'echo "run git commit to save"', description: "" }, "ses_1", ctx)
     expect(counters.commit.calls).toHaveLength(1)
   })
 
   test("matches git commit with --amend", () => {
     const { ctx, counters } = makeCtx()
-    handleCommandExecuted(makeCommandExecuted("bash", "git commit --amend --no-edit"), ctx)
+    handleToolResult("bash", { command: "git commit --amend --no-edit", description: "" }, "ses_1", ctx)
+    expect(counters.commit.calls).toHaveLength(1)
+  })
+
+  test("matches when description contains git commit", () => {
+    const { ctx, counters } = makeCtx()
+    handleToolResult("bash", { command: "/usr/bin/env sh -c 'foo'", description: "git commit the changes" }, "ses_1", ctx)
+    expect(counters.commit.calls).toHaveLength(1)
+  })
+
+  test("handles missing command and description fields", () => {
+    const { ctx, counters } = makeCtx()
+    handleToolResult("bash", {}, "ses_1", ctx)
+    expect(counters.commit.calls).toHaveLength(0)
+  })
+
+  test("does not double-count when both fields match", () => {
+    const { ctx, counters } = makeCtx()
+    handleToolResult("bash", { command: "git commit -m foo", description: "git commit changes" }, "ses_1", ctx)
     expect(counters.commit.calls).toHaveLength(1)
   })
 })

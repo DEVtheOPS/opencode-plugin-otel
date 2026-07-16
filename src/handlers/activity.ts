@@ -1,5 +1,5 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
-import type { EventSessionDiff, EventCommandExecuted } from "@opencode-ai/sdk"
+import type { EventSessionDiff } from "@opencode-ai/sdk"
 import { agentAttrs, getSessionAgentMeta, isMetricEnabled, setBoundedMap } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
 
@@ -57,19 +57,31 @@ export function handleSessionDiff(e: EventSessionDiff, ctx: HandlerContext) {
 
 const GIT_COMMIT_RE = /\bgit\s+commit(?![-\w])/
 
-/** Detects `git commit` invocations in bash tool calls and increments the commit counter and emits a `commit` log event. */
-export function handleCommandExecuted(e: EventCommandExecuted, ctx: HandlerContext) {
-  if (e.properties.name !== "bash") return
-  ctx.log("debug", "otel: command.executed (bash)", { sessionID: e.properties.sessionID, argumentsLength: e.properties.arguments.length })
-  if (!GIT_COMMIT_RE.test(e.properties.arguments)) return
-  const { agentName, agentType } = getSessionAgentMeta(e.properties.sessionID, ctx)
+/**
+ * Detects `git commit` invocations in completed bash tool calls and increments the
+ * commit counter and emits a `commit` log event. Called from the tool-completion
+ * branch of `handleMessagePartUpdated` — opencode's `command.executed` event covers
+ * slash commands only and never fires for bash tool calls.
+ */
+export function handleToolResult(
+  toolName: string,
+  toolInput: { [key: string]: unknown } | undefined,
+  sessionID: string,
+  ctx: HandlerContext,
+) {
+  if (toolName !== "bash") return
+  const input = toolInput ?? {}
+  const command = typeof input["command"] === "string" ? input["command"] : ""
+  const description = typeof input["description"] === "string" ? input["description"] : ""
+  if (!GIT_COMMIT_RE.test(command) && !GIT_COMMIT_RE.test(description)) return
+  const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
 
   if (isMetricEnabled("commit.count", ctx)) {
     ctx.instruments.commitCounter.add(1, {
       ...ctx.commonAttrs,
-      "session.id": e.properties.sessionID,
+      "session.id": sessionID,
     })
-    ctx.log("debug", "otel: commit counter incremented", { sessionID: e.properties.sessionID })
+    ctx.log("debug", "otel: commit counter incremented", { sessionID })
   }
   ctx.emitLog({
     severityNumber: SeverityNumber.INFO,
@@ -79,7 +91,7 @@ export function handleCommandExecuted(e: EventCommandExecuted, ctx: HandlerConte
     body: "commit",
     attributes: {
       "event.name": "commit",
-      "session.id": e.properties.sessionID,
+      "session.id": sessionID,
       ...agentAttrs(agentName, agentType),
       ...ctx.commonAttrs,
     },
