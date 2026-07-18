@@ -21,6 +21,7 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
   - [Disabling specific metrics](#disabling-specific-metrics)
   - [Disabling OTLP logs (`OPENCODE_DISABLE_LOGS`)](#disabling-otlp-logs)
   - [Disabling traces (`OPENCODE_DISABLE_TRACES`)](#disabling-traces)
+  - [Long-running session spans (`OPENCODE_LONG_RUNNING_SESSION_SPANS`)](#long-running-session-spans)
   - [SigNoz example](#signoz-example)
   - [Datadog example](#datadog-example)
   - [Honeycomb example](#honeycomb-example)
@@ -100,6 +101,7 @@ The environment variables (set them in your shell profile — `~/.zshrc`, `~/.ba
 | `OPENCODE_DISABLE_METRICS` | *(unset)* | Comma-separated list of metric name suffixes to disable (e.g. `cache.count,session.duration`) |
 | `OPENCODE_DISABLE_LOGS` | *(unset)* | Set to any non-empty value to suppress all OTLP log events while leaving metrics and traces unchanged |
 | `OPENCODE_DISABLE_TRACES` | *(unset)* | Comma-separated list of trace types to disable (`session`, `llm`, `tool`). Use `all`, `*`, `true`, or `1` to disable every trace type |
+| `OPENCODE_LONG_RUNNING_SESSION_SPANS` | *(unset)* | Set to any non-empty value to keep one root `opencode.session` span open for the full lifetime of a primary session, instead of a new root span per turn. See [Long-running session spans](#long-running-session-spans). |
 | `OPENCODE_OTLP_HEADERS` | *(unset)* | Comma-separated `key=value` headers added to all OTLP exports. **Keep out of version control — may contain sensitive auth tokens.** |
 | `OPENCODE_OTLP_HEADERS_HELPER` | *(unset)* | Executable script/binary that returns dynamic OTLP headers as JSON after an auth failure. Helper headers override `OPENCODE_OTLP_HEADERS`. |
 | `OPENCODE_RESOURCE_ATTRIBUTES` | *(unset)* | Comma-separated `key=value` pairs merged into the OTel resource. Example: `service.version=1.2.3,deployment.environment=production` |
@@ -148,6 +150,7 @@ Option keys mirror the resolved config and map to the environment variables:
 | `metricsTemporality` | `OPENCODE_OTLP_METRICS_TEMPORALITY` |
 | `disabledMetrics` | `OPENCODE_DISABLE_METRICS` (array, not a comma string) |
 | `disabledTraces` | `OPENCODE_DISABLE_TRACES` (array, not a comma string) |
+| `longRunningSessionSpans` | `OPENCODE_LONG_RUNNING_SESSION_SPANS` |
 
 > **Security note:** `opencode.json` is frequently committed to version control. Keep secrets such as `otlpHeaders` in an environment variable or an opencode `{env:VAR}` substitution (e.g. `"otlpHeaders": "{env:OTEL_HEADERS}"`) rather than inline.
 
@@ -270,6 +273,18 @@ export OPENCODE_DISABLE_TRACES="all"
 ```
 
 Accepted explicit "disable all traces" values are `all`, `*`, `true`, and `1`.
+
+### Long-running session spans
+
+By default, each user turn in a primary (non-subagent) session starts its own root `opencode.session` span, ended when that turn goes idle. This keeps traces short-lived, but means a long-running opencode session (many turns over minutes or hours) shows up as a series of disconnected traces rather than one cohesive trace.
+
+Set `OPENCODE_LONG_RUNNING_SESSION_SPANS` to keep a single root `opencode.session` span open for the entire lifetime of a primary session instead: it starts on `session.created` and stays open across `session.idle`, so every turn's LLM and tool spans nest under it, only ending on `session.deleted` (or on session error/shutdown). Subagent sessions already behave this way regardless of this flag, since they're expected to nest under their parent for the session's duration.
+
+```bash
+export OPENCODE_LONG_RUNNING_SESSION_SPANS=1
+```
+
+Turn this on if you want one trace per opencode session in your backend rather than one trace per turn. Leave it unset if your backend or dashboards assume shorter, per-turn traces.
 
 ### SigNoz example
 

@@ -75,6 +75,7 @@ describe("loadConfig", () => {
     "OPENCODE_DISABLE_METRICS",
     "OPENCODE_DISABLE_LOGS",
     "OPENCODE_DISABLE_TRACES",
+    "OPENCODE_LONG_RUNNING_SESSION_SPANS",
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_RESOURCE_ATTRIBUTES",
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
@@ -90,6 +91,7 @@ describe("loadConfig", () => {
     expect(cfg.protocol).toBe("grpc")
     expect(cfg.metricsInterval).toBe(60000)
     expect(cfg.logsInterval).toBe(5000)
+    expect(cfg.longRunningSessionSpans).toBe(false)
   })
 
   test("enabled when OPENCODE_ENABLE_TELEMETRY is set", () => {
@@ -100,6 +102,16 @@ describe("loadConfig", () => {
   test("logsEnabled is false when OPENCODE_DISABLE_LOGS is set", () => {
     process.env["OPENCODE_DISABLE_LOGS"] = "1"
     expect(loadConfig().logsEnabled).toBe(false)
+  })
+
+  test("longRunningSessionSpans is true when OPENCODE_LONG_RUNNING_SESSION_SPANS is set", () => {
+    process.env["OPENCODE_LONG_RUNNING_SESSION_SPANS"] = "1"
+    expect(loadConfig().longRunningSessionSpans).toBe(true)
+  })
+
+  test("option longRunningSessionSpans wins over OPENCODE_LONG_RUNNING_SESSION_SPANS", () => {
+    process.env["OPENCODE_LONG_RUNNING_SESSION_SPANS"] = "1"
+    expect(loadConfig({ longRunningSessionSpans: false }).longRunningSessionSpans).toBe(false)
   })
 
   test("reads custom endpoint", () => {
@@ -341,6 +353,7 @@ describe("loadConfig options", () => {
     "OPENCODE_DISABLE_METRICS",
     "OPENCODE_DISABLE_LOGS",
     "OPENCODE_DISABLE_TRACES",
+    "OPENCODE_LONG_RUNNING_SESSION_SPANS",
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_RESOURCE_ATTRIBUTES",
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",

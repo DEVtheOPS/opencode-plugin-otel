@@ -16,13 +16,14 @@ import {
   TOOL_NAME,
 } from "@arizeai/openinference-semantic-conventions"
 import type { Span } from "@opentelemetry/api"
-import { handleSessionCreated, handleSessionIdle, handleSessionError, handleRunStarted } from "../../src/handlers/session.ts"
+import { handleSessionCreated, handleSessionIdle, handleSessionDeleted, handleSessionError, handleRunStarted } from "../../src/handlers/session.ts"
 import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "../../src/handlers/message.ts"
 import { remoteParentContext } from "../../src/trace-context.ts"
 import { makeCtx, makeTracer, type SpySpan } from "../helpers.ts"
 import type {
   EventSessionCreated,
   EventSessionIdle,
+  EventSessionDeleted,
   EventSessionError,
   EventMessageUpdated,
   EventMessagePartUpdated,
@@ -39,6 +40,10 @@ function makeSessionCreated(sessionID: string, createdAt = 1000, parentID?: stri
 
 function makeSessionIdle(sessionID: string): EventSessionIdle {
   return { type: "session.idle", properties: { sessionID } } as EventSessionIdle
+}
+
+function makeSessionDeleted(sessionID: string): EventSessionDeleted {
+  return { type: "session.deleted", properties: { info: { id: sessionID } } } as unknown as EventSessionDeleted
 }
 
 function makeSessionError(sessionID?: string, error?: { name: string }): EventSessionError {
@@ -100,11 +105,20 @@ function makeToolPartUpdated(
 }
 
 describe("session spans", () => {
-  test("does not start a root trace span on session.created for primary sessions", () => {
+  test("does not start a root trace span on session.created for primary sessions by default", () => {
     const { ctx, tracer } = makeCtx()
     handleSessionCreated(makeSessionCreated("ses_1", 5000), ctx)
     expect(tracer.spans).toHaveLength(0)
     expect(ctx.sessionSpans.has("ses_1")).toBe(false)
+  })
+
+  test("starts a long-lived root session span on session.created for primary sessions when OPENCODE_LONG_RUNNING_SESSION_SPANS is enabled", () => {
+    const { ctx, tracer } = makeCtx("proj_test", [], [], true, {}, true)
+    handleSessionCreated(makeSessionCreated("ses_1", 5000), ctx)
+    expect(tracer.spans).toHaveLength(1)
+    expect(ctx.sessionSpans.has("ses_1")).toBe(true)
+    expect(tracer.spans[0]!.attributes["session.is_subagent"]).toBe(false)
+    expect(tracer.spans[0]!.attributes["agent.type"]).toBe("primary")
   })
 
   test("subagent session span carries session.id attribute", () => {
@@ -180,6 +194,76 @@ describe("session spans", () => {
     expect(span.attributes["session.total_messages"]).toBe(3)
     expect(span.attributes[AGENT_NAME]).toBe("build")
     expect(span.attributes["agent.type"]).toBe("primary")
+  })
+
+  test("keeps subagent session span open across session.idle so later turns can nest under it", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(makeSessionCreated("ses_1", 1000, "ses_parent"), ctx)
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    const span = tracer.spans[0]!
+    expect(span.ended).toBe(false)
+    expect(ctx.sessionSpans.has("ses_1")).toBe(true)
+    expect(ctx.sessionTotals.has("ses_1")).toBe(true)
+  })
+
+  test("sets session total attributes on subagent session.idle without ending the span", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(makeSessionCreated("ses_1", 1000, "ses_parent"), ctx)
+    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 100, tokens: 250, cost: 0.05, messages: 3, agent: "review", agentType: "subagent" })
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    const span = tracer.spans[0]!
+    expect(span.attributes["session.total_tokens"]).toBe(250)
+    expect(span.attributes["session.total_cost_usd"]).toBe(0.05)
+    expect(span.attributes["session.total_messages"]).toBe(3)
+    expect(span.attributes[AGENT_NAME]).toBe("review")
+    expect(span.attributes["agent.type"]).toBe("subagent")
+    expect(span.ended).toBe(false)
+  })
+
+  test("ends subagent session span with OK status and clears totals on session.deleted", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(makeSessionCreated("ses_1", 1000, "ses_parent"), ctx)
+    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 100, tokens: 250, cost: 0.05, messages: 3, agent: "review", agentType: "subagent" })
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    const span = tracer.spans[0]!
+    expect(span.ended).toBe(true)
+    expect(span.status.code).toBe(SpanStatusCode.OK)
+    expect(span.attributes["session.total_tokens"]).toBe(250)
+    expect(ctx.sessionSpans.has("ses_1")).toBe(false)
+    expect(ctx.sessionTotals.has("ses_1")).toBe(false)
+  })
+
+  test("a second turn's LLM span nests under the still-open subagent session span after idle", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(makeSessionCreated("ses_1", 1000, "ses_parent"), ctx)
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    startMessageSpan("ses_1", "msg_2", "user_2", "claude-3-5-sonnet", "anthropic", 5000, ctx)
+    const sessionSpan = tracer.spans[0]!
+    const llmSpan = tracer.spans[1]!
+    expect(llmSpan.parentSpan).toBe(sessionSpan)
+  })
+
+  test("primary session: later turns' LLM and tool spans nest under one long-lived session span across idle when OPENCODE_LONG_RUNNING_SESSION_SPANS is enabled", () => {
+    const { ctx, tracer } = makeCtx("proj_test", [], [], true, {}, true)
+    handleSessionCreated(makeSessionCreated("ses_1", 1000), ctx)
+    const sessionSpan = tracer.spans[0]!
+    // turn 1 completes, session goes idle but the primary session span stays open
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    expect(sessionSpan.ended).toBe(false)
+    // turn 2: a new LLM message and a tool call must nest under the same session span
+    startMessageSpan("ses_1", "msg_2", "user_2", "claude-3-5-sonnet", "anthropic", 5000, ctx)
+    handleMessagePartUpdated(makeToolPartUpdated("running", { startMs: 5100 }), ctx)
+    const llmSpan = tracer.spans[1]!
+    const toolSpan = tracer.spans[2]!
+    expect(llmSpan.parentSpan).toBe(sessionSpan)
+    expect(toolSpan.parentSpan).toBe(sessionSpan)
+    // one cohesive trace, not orphaned roots
+    expect(llmSpan.spanContext().traceId).toBe(sessionSpan.spanContext().traceId)
+    expect(toolSpan.spanContext().traceId).toBe(sessionSpan.spanContext().traceId)
+    // finalized only on delete
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    expect(sessionSpan.ended).toBe(true)
   })
 
   test("ends run span with ERROR status on session.error", () => {
@@ -567,9 +651,10 @@ describe("OPENCODE_DISABLE_TRACES=llm", () => {
   })
 
   test("session spans still created when only llm disabled", () => {
-    const { ctx, tracer } = makeCtx("proj_test", [], ["llm"])
+    const { ctx, tracer } = makeCtx("proj_test", [], ["llm"], true, {}, true)
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    expect(tracer.spans).toHaveLength(0)
+    expect(tracer.spans).toHaveLength(1)
+    expect(ctx.sessionSpans.has("ses_1")).toBe(true)
   })
 })
 
@@ -610,8 +695,9 @@ describe("OPENCODE_DISABLE_TRACES=tool", () => {
   })
 
   test("session spans still created when only tool disabled", () => {
-    const { ctx, tracer } = makeCtx("proj_test", [], ["tool"])
+    const { ctx, tracer } = makeCtx("proj_test", [], ["tool"], true, {}, true)
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    expect(tracer.spans).toHaveLength(0)
+    expect(tracer.spans).toHaveLength(1)
+    expect(ctx.sessionSpans.has("ses_1")).toBe(true)
   })
 })

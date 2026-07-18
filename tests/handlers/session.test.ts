@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test"
-import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus } from "../../src/handlers/session.ts"
+import { handleSessionCreated, handleSessionIdle, handleSessionDeleted, handleSessionError, handleSessionStatus } from "../../src/handlers/session.ts"
 import { makeCtx, makeTracer } from "../helpers.ts"
-import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
+import type { EventSessionCreated, EventSessionIdle, EventSessionDeleted, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
 import type { Span } from "@opentelemetry/api"
 
 function makeSessionCreated(sessionID: string, createdAt = 1000, parentID?: string): EventSessionCreated {
@@ -153,12 +153,56 @@ describe("handleSessionIdle", () => {
     expect(gauges.sessionCost.calls).toHaveLength(0)
   })
 
-  test("removes sessionTotals entry on idle", async () => {
+  test("keeps sessionTotals entry across idle so later turns keep accumulating", async () => {
     const { ctx } = makeCtx()
     await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     expect(ctx.sessionTotals.has("ses_1")).toBe(true)
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    expect(ctx.sessionTotals.has("ses_1")).toBe(true)
+  })
+})
+
+describe("handleSessionDeleted", () => {
+  function makeSessionDeleted(sessionID: string): EventSessionDeleted {
+    return { type: "session.deleted", properties: { info: { id: sessionID } } } as unknown as EventSessionDeleted
+  }
+
+  test("removes sessionTotals and sessionDiffTotals entries", async () => {
+    const { ctx } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    ctx.sessionDiffTotals.set("ses_1", { additions: 1, deletions: 2 })
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
     expect(ctx.sessionTotals.has("ses_1")).toBe(false)
+    expect(ctx.sessionDiffTotals.has("ses_1")).toBe(false)
+  })
+
+  test("ends the session span with OK status", async () => {
+    const { ctx, tracer } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1", 1000, "ses_parent"), ctx)
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    const span = tracer.spans[0]!
+    expect(span.ended).toBe(true)
+    expect(ctx.sessionSpans.has("ses_1")).toBe(false)
+  })
+
+  test("sets agent.type on the session span from the last known totals", async () => {
+    const { ctx, tracer } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1", 1000, "ses_parent"), ctx)
+    ctx.sessionTotals.set("ses_1", { startMs: 1000, tokens: 10, cost: 0.01, messages: 1, agent: "review", agentType: "subagent" })
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    const span = tracer.spans[0]!
+    expect(span.attributes["agent.type"]).toBe("subagent")
+  })
+
+  test("emits session.deleted log record", async () => {
+    const { ctx, logger } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1", 1000, "ses_parent"), ctx)
+    ctx.sessionTotals.set("ses_1", { startMs: 1000, tokens: 10, cost: 0.01, messages: 1, agent: "review", agentType: "subagent" })
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    const record = logger.records.find(r => r.body === "session.deleted")
+    expect(record).toBeDefined()
+    expect(record!.attributes?.["session.id"]).toBe("ses_1")
+    expect(record!.attributes?.["agent"]).toBe("review")
   })
 })
 

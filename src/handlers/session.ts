@@ -1,6 +1,6 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { SpanStatusCode } from "@opentelemetry/api"
-import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
+import type { EventSessionCreated, EventSessionIdle, EventSessionDeleted, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
 import {
   AGENT_NAME,
   INPUT_MIME_TYPE,
@@ -92,7 +92,7 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
   }
   setBoundedMap(ctx.sessionTotals, sessionID, { startMs: createdAt, tokens: 0, cost: 0, messages: 0, agent: "unknown", agentType })
 
-  if (isTraceEnabled("session", ctx) && parentID) {
+  if (isTraceEnabled("session", ctx) && (parentID || ctx.longRunningSessionSpans)) {
     const sessionSpan = ctx.tracer.startSpan(
       `${ctx.tracePrefix}session`,
       {
@@ -106,7 +106,7 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
           ...ctx.commonAttrs,
         },
       },
-      resolveSessionTraceContext(parentID, ctx),
+      parentID ? resolveSessionTraceContext(parentID, ctx) : ctx.rootContext(),
     )
     ctx.sessionSpans.set(sessionID, sessionSpan)
     setBoundedMap(ctx.sessionSpanContexts, sessionID, sessionSpan.spanContext())
@@ -154,13 +154,22 @@ function sweepSession(sessionID: string, ctx: HandlerContext) {
   }
 }
 
-/** Emits a `session.idle` log event, records duration and session total histograms, ends the session span, and clears pending state. */
+/**
+ * Emits a `session.idle` log event and records duration/total histograms for the turn
+ * that just completed, then sweeps per-turn pending state (tool/message spans, pending
+ * permissions, the cached user prompt).
+ *
+ * Unlike a one-shot turn, an opencode session stays alive and may receive further user
+ * messages, so `session.total_*` totals are kept open across `session.idle` events.
+ * When `OPENCODE_LONG_RUNNING_SESSION_SPANS` is enabled, the root `opencode.session`
+ * span for primary sessions is kept open here too: ending it would otherwise orphan
+ * every subsequent turn's LLM/tool spans as new root traces. The span and totals are
+ * only finalized in `handleSessionDeleted` (or `handleSessionError`/shutdown).
+ */
 export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
   const sessionID = e.properties.sessionID
   const totals = ctx.sessionTotals.get(sessionID)
   const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
-  ctx.sessionTotals.delete(sessionID)
-  ctx.sessionDiffTotals.delete(sessionID)
   sweepSession(sessionID, ctx)
 
   const attrs = { ...ctx.commonAttrs, "session.id": sessionID }
@@ -180,19 +189,14 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
   }
 
   const sessionSpan = ctx.sessionSpans.get(sessionID)
-  if (sessionSpan) {
-    if (totals) {
-      sessionSpan.setAttributes({
-        [AGENT_NAME]: totals.agent,
-        "agent.type": totals.agentType,
-        "session.total_tokens": totals.tokens,
-        "session.total_cost_usd": totals.cost,
-        "session.total_messages": totals.messages,
-      })
-    }
-    sessionSpan.setStatus({ code: SpanStatusCode.OK })
-    sessionSpan.end()
-    ctx.sessionSpans.delete(sessionID)
+  if (sessionSpan && totals) {
+    sessionSpan.setAttributes({
+      [AGENT_NAME]: totals.agent,
+      "agent.type": totals.agentType,
+      "session.total_tokens": totals.tokens,
+      "session.total_cost_usd": totals.cost,
+      "session.total_messages": totals.messages,
+    })
   }
   const runID = ctx.activeRuns.get(sessionID)
   if (runID) ctx.activeRuns.delete(sessionID)
@@ -232,6 +236,53 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
     sessionID,
     ...(totals ? { duration_ms, total_tokens: totals.tokens, total_cost_usd: totals.cost, total_messages: totals.messages } : {}),
   })
+}
+
+/**
+ * Final cleanup when a session is removed: ends the root `opencode.session` span with the
+ * last known totals, and clears the session's accumulated totals and pending state. This is
+ * the counterpart to the "keep the span open across `session.idle`" behavior above — it's
+ * where a long-lived session's span and totals actually get torn down.
+ */
+export function handleSessionDeleted(e: EventSessionDeleted, ctx: HandlerContext) {
+  const sessionID = e.properties.info.id
+  const totals = ctx.sessionTotals.get(sessionID)
+  const agentName = totals?.agent ?? "unknown"
+  const agentType = totals?.agentType ?? "unknown"
+  ctx.sessionTotals.delete(sessionID)
+  ctx.sessionDiffTotals.delete(sessionID)
+  sweepSession(sessionID, ctx)
+
+  const sessionSpan = ctx.sessionSpans.get(sessionID)
+  if (sessionSpan) {
+    if (totals) {
+      sessionSpan.setAttributes({
+        [AGENT_NAME]: totals.agent,
+        "agent.type": totals.agentType,
+        "session.total_tokens": totals.tokens,
+        "session.total_cost_usd": totals.cost,
+        "session.total_messages": totals.messages,
+      })
+    }
+    sessionSpan.setStatus({ code: SpanStatusCode.OK })
+    sessionSpan.end()
+    ctx.sessionSpans.delete(sessionID)
+  }
+
+  ctx.emitLog({
+    severityNumber: SeverityNumber.INFO,
+    severityText: "INFO",
+    timestamp: Date.now(),
+    observedTimestamp: Date.now(),
+    body: "session.deleted",
+    attributes: {
+      "event.name": "session.deleted",
+      "session.id": sessionID,
+      ...agentAttrs(agentName, agentType),
+      ...ctx.commonAttrs,
+    },
+  })
+  ctx.log("debug", "otel: session.deleted", { sessionID })
 }
 
 /** Emits a `session.error` log event, ends the session span with error status, and clears any pending state for the session. */
