@@ -348,10 +348,16 @@ describe("tool spans", () => {
 describe("message (LLM) spans", () => {
   test("startMessageSpan creates an llm span", () => {
     const { ctx, tracer } = makeCtx()
-    startMessageSpan("ses_1", "msg_1", "user_1", "claude-3-5-sonnet", "anthropic", 1000, ctx)
+    startMessageSpan("ses_1", "msg_1", "user_1", "claude-3-5-sonnet", "anthropic", 1000, ctx, "build")
     expect(tracer.spans).toHaveLength(1)
     expect(tracer.spans[0]!.name).toBe("opencode.llm")
     expect(ctx.messageSpans.has("ses_1:msg_1")).toBe(true)
+    expect(ctx.llmRequestContexts.get("ses_1:user_1")?.[0]).toMatchObject({
+      messageID: "msg_1",
+      agent: "build",
+      modelID: "claude-3-5-sonnet",
+      providerID: "anthropic",
+    })
   })
 
   test("startMessageSpan sets OpenInference LLM attributes", () => {
@@ -379,6 +385,17 @@ describe("message (LLM) spans", () => {
     expect(span.ended).toBe(true)
     expect(span.endTime).toBe(2000)
     expect(ctx.messageSpans.has("ses_1:msg_1")).toBe(false)
+    expect(ctx.llmRequestContexts.has("ses_1:user_1")).toBe(false)
+  })
+
+  test("an older completion does not remove a newer request context", () => {
+    const { ctx } = makeCtx()
+    startMessageSpan("ses_1", "msg_1", "user_1", "claude", "anthropic", 1000, ctx)
+    startMessageSpan("ses_1", "msg_2", "user_1", "claude", "anthropic", 1500, ctx)
+
+    handleMessageUpdated(makeAssistantMessageUpdated({ id: "msg_1", time: { created: 1000, completed: 2000 } }), ctx)
+
+    expect(ctx.llmRequestContexts.get("ses_1:user_1")?.map(request => request.messageID)).toEqual(["msg_2"])
   })
 
   test("handleMessageUpdated sets OK status on success", () => {
@@ -476,6 +493,7 @@ describe("orphaned span cleanup", () => {
     startMessageSpan("ses_1", "msg_orphan", "user_1", "claude", "anthropic", 1000, ctx)
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     expect(ctx.messageSpans.has("ses_1:msg_orphan")).toBe(false)
+    expect(ctx.llmRequestContexts.has("ses_1:user_1")).toBe(false)
     const msgSpan = tracer.spans.find(s => s.name === "opencode.llm")!
     expect(msgSpan.ended).toBe(true)
     expect(msgSpan.status.code).toBe(SpanStatusCode.ERROR)

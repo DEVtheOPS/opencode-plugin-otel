@@ -151,6 +151,13 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
     ctx.messageSpans.delete(msgKey)
     ctx.messageOutputs.delete(msgKey)
   }
+  const requestKey = `${sessionID}:${assistant.parentID}`
+  const remainingRequests = ctx.llmRequestContexts.get(requestKey)?.filter(request => request.messageID !== assistant.id)
+  if (remainingRequests?.length) {
+    setBoundedMap(ctx.llmRequestContexts, requestKey, remainingRequests)
+  } else {
+    ctx.llmRequestContexts.delete(requestKey)
+  }
 
   if (assistant.error) {
     ctx.emitLog({
@@ -424,6 +431,7 @@ export function startMessageSpan(
   providerID: string,
   startTime: number,
   ctx: HandlerContext,
+  agent?: string,
 ) {
   if (!isTraceEnabled("llm", ctx)) return
   const msgKey = `${sessionID}:${messageID}`
@@ -459,4 +467,15 @@ export function startMessageSpan(
     resolveSessionTraceContext(sessionID, ctx, { runID: parentID, assistantMessageID: messageID }),
   )
   setBoundedMap(ctx.messageSpans, msgKey, msgSpan)
+  const requestKey = `${sessionID}:${parentID}`
+  setBoundedMap(ctx.llmRequestContexts, requestKey, [
+    ...(ctx.llmRequestContexts.get(requestKey) ?? []),
+    {
+      messageID,
+      agent: agent ?? agentName,
+      modelID,
+      providerID,
+      spanContext: msgSpan.spanContext(),
+    },
+  ])
 }

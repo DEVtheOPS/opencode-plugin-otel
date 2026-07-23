@@ -75,6 +75,7 @@ describe("loadConfig", () => {
     "OPENCODE_DISABLE_METRICS",
     "OPENCODE_DISABLE_LOGS",
     "OPENCODE_DISABLE_TRACES",
+    "OPENCODE_TRACE_PROPAGATION_PROVIDERS",
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_RESOURCE_ATTRIBUTES",
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
@@ -325,6 +326,15 @@ describe("loadConfig", () => {
     process.env["OPENCODE_DISABLE_TRACES"] = "1"
     expect(loadConfig().disabledTraces).toEqual(new Set(TRACE_TYPES))
   })
+
+  test("tracePropagationProviders is empty when unset", () => {
+    expect(loadConfig().tracePropagationProviders).toEqual(new Set())
+  })
+
+  test("parses trace propagation providers", () => {
+    process.env["OPENCODE_TRACE_PROPAGATION_PROVIDERS"] = " company-litellm , vllm "
+    expect(loadConfig().tracePropagationProviders).toEqual(new Set(["company-litellm", "vllm"]))
+  })
 })
 
 describe("loadConfig options", () => {
@@ -341,6 +351,7 @@ describe("loadConfig options", () => {
     "OPENCODE_DISABLE_METRICS",
     "OPENCODE_DISABLE_LOGS",
     "OPENCODE_DISABLE_TRACES",
+    "OPENCODE_TRACE_PROPAGATION_PROVIDERS",
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_RESOURCE_ATTRIBUTES",
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
@@ -450,6 +461,14 @@ describe("loadConfig options", () => {
   test("option disabledTraces array trims and lowercases entries", () => {
     const { disabledTraces } = loadConfig({ disabledTraces: [" LLM ", "Tool"] })
     expect(disabledTraces).toEqual(new Set(["llm", "tool"]))
+  })
+
+  test("option tracePropagationProviders overrides the env var", () => {
+    process.env["OPENCODE_TRACE_PROPAGATION_PROVIDERS"] = "env-provider"
+    const { tracePropagationProviders } = loadConfig({
+      tracePropagationProviders: [" company-litellm ", "vllm"],
+    })
+    expect(tracePropagationProviders).toEqual(new Set(["company-litellm", "vllm"]))
   })
 
   test("env values still apply when no options are passed", () => {

@@ -75,6 +75,15 @@ export type PendingRun = {
   startTime: number
 }
 
+/** Live LLM request span metadata used by the outbound header hook. */
+export type LlmRequestContext = {
+  messageID: string
+  agent: string
+  modelID: string
+  providerID: string
+  spanContext: SpanContext
+}
+
 /** Shared context threaded through every event handler. */
 export type HandlerContext = {
   log: PluginLogger
@@ -100,4 +109,6 @@ export type HandlerContext = {
   sessionSpanContexts: Map<string, SpanContext>
   messageSpans: Map<string, Span>
   messageOutputs: Map<string, string>
+  llmRequestContexts: Map<string, LlmRequestContext[]>
+  tracePropagationProviders: Set<string>
 }

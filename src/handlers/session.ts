@@ -152,6 +152,9 @@ function sweepSession(sessionID: string, ctx: HandlerContext) {
   for (const key of ctx.messageOutputs.keys()) {
     if (key.startsWith(msgPrefix)) ctx.messageOutputs.delete(key)
   }
+  for (const key of ctx.llmRequestContexts.keys()) {
+    if (key.startsWith(msgPrefix)) ctx.llmRequestContexts.delete(key)
+  }
 }
 
 /** Emits a `session.idle` log event, records duration and session total histograms, ends the session span, and clears pending state. */

@@ -37,10 +37,7 @@ jobs:
   notify:
     name: Send Discord notification
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: read
-      pull-requests: read
+    permissions: {}
     steps:
       - name: Build payload
         id: payload
