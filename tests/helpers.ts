@@ -242,6 +242,8 @@ export function makeCtx(
     sessionSpanContexts: new Map(),
     messageSpans: new Map(),
     messageOutputs: new Map(),
+    llmRequestContexts: new Map(),
+    tracePropagationProviders: new Set(),
   }
 
   return {
