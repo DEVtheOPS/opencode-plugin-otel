@@ -125,6 +125,28 @@ describe("handleChatHeaders", () => {
     expect(reviewOutput.headers.traceparent).toContain("4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7")
   })
 
+  test("selects the newest live request when metadata is identical", () => {
+    const { ctx } = makeCtx()
+    ctx.tracePropagationProviders.add("company-litellm")
+    seedRequest(ctx)
+    ctx.llmRequestContexts.get("ses_1:user_1")!.push({
+      messageID: "msg_2",
+      agent: "build",
+      modelID: "claude",
+      providerID: "company-litellm",
+      spanContext: {
+        traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+        spanId: "00f067aa0ba902b7",
+        traceFlags: 1,
+      },
+    })
+    const output = { headers: {} as Record<string, string> }
+
+    handleChatHeaders(makeInput(), output, ctx)
+
+    expect(output.headers.traceparent).toBe("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+  })
+
   test("requires matching model and provider metadata", () => {
     const { ctx } = makeCtx()
     ctx.tracePropagationProviders.add("*")

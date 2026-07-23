@@ -12,7 +12,7 @@ export function handleChatHeaders(
   const providerID = input.model.providerID
   if (!ctx.tracePropagationProviders.has(providerID) && !ctx.tracePropagationProviders.has("*")) return
 
-  const request = ctx.llmRequestContexts.get(`${input.sessionID}:${input.message.id}`)?.find(candidate =>
+  const request = ctx.llmRequestContexts.get(`${input.sessionID}:${input.message.id}`)?.findLast(candidate =>
     candidate.agent === input.agent
     && candidate.modelID === input.model.id
     && candidate.providerID === providerID
