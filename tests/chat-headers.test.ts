@@ -15,17 +15,19 @@ function makeInput(overrides: { agent?: string; modelID?: string; providerID?: s
 }
 
 function seedRequest(ctx: ReturnType<typeof makeCtx>["ctx"], overrides: { agent?: string; modelID?: string; providerID?: string } = {}) {
-  ctx.llmRequestContexts.set("ses_1:user_1", {
-    messageID: "msg_1",
-    agent: overrides.agent ?? "build",
-    modelID: overrides.modelID ?? "claude",
-    providerID: overrides.providerID ?? "company-litellm",
-    spanContext: {
-      traceId: "0af7651916cd43dd8448eb211c80319c",
-      spanId: "b7ad6b7169203331",
-      traceFlags: 1,
+  ctx.llmRequestContexts.set("ses_1:user_1", [
+    {
+      messageID: "msg_1",
+      agent: overrides.agent ?? "build",
+      modelID: overrides.modelID ?? "claude",
+      providerID: overrides.providerID ?? "company-litellm",
+      spanContext: {
+        traceId: "0af7651916cd43dd8448eb211c80319c",
+        spanId: "b7ad6b7169203331",
+        traceFlags: 1,
+      },
     },
-  })
+  ])
 }
 
 describe("handleChatHeaders", () => {
@@ -44,7 +46,7 @@ describe("handleChatHeaders", () => {
     const { ctx } = makeCtx()
     ctx.tracePropagationProviders.add("company-litellm")
     seedRequest(ctx)
-    ctx.llmRequestContexts.get("ses_1:user_1")!.spanContext.traceState = createTraceState("vendor=value")
+    ctx.llmRequestContexts.get("ses_1:user_1")![0]!.spanContext.traceState = createTraceState("vendor=value")
     const output = { headers: {} as Record<string, string> }
 
     handleChatHeaders(makeInput(), output, ctx)
@@ -92,6 +94,35 @@ describe("handleChatHeaders", () => {
     handleChatHeaders(makeInput({ agent: "title" }), output, ctx)
 
     expect(output.headers).toEqual({})
+  })
+
+  test("selects each concurrently live request by agent, model, and provider", () => {
+    const { ctx } = makeCtx()
+    ctx.tracePropagationProviders.add("*")
+    seedRequest(ctx)
+    ctx.llmRequestContexts.get("ses_1:user_1")!.push({
+      messageID: "msg_2",
+      agent: "review",
+      modelID: "gpt-5",
+      providerID: "company-openai",
+      spanContext: {
+        traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+        spanId: "00f067aa0ba902b7",
+        traceFlags: 1,
+      },
+    })
+    const buildOutput = { headers: {} as Record<string, string> }
+    const reviewOutput = { headers: {} as Record<string, string> }
+
+    handleChatHeaders(makeInput(), buildOutput, ctx)
+    handleChatHeaders(
+      makeInput({ agent: "review", modelID: "gpt-5", providerID: "company-openai" }),
+      reviewOutput,
+      ctx,
+    )
+
+    expect(buildOutput.headers.traceparent).toContain("0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331")
+    expect(reviewOutput.headers.traceparent).toContain("4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7")
   })
 
   test("requires matching model and provider metadata", () => {

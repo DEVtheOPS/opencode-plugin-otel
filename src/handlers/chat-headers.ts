@@ -12,13 +12,12 @@ export function handleChatHeaders(
   const providerID = input.model.providerID
   if (!ctx.tracePropagationProviders.has(providerID) && !ctx.tracePropagationProviders.has("*")) return
 
-  const request = ctx.llmRequestContexts.get(`${input.sessionID}:${input.message.id}`)
+  const request = ctx.llmRequestContexts.get(`${input.sessionID}:${input.message.id}`)?.find(candidate =>
+    candidate.agent === input.agent
+    && candidate.modelID === input.model.id
+    && candidate.providerID === providerID
+  )
   if (!request) return
-  if (
-    request.agent !== input.agent
-    || request.modelID !== input.model.id
-    || request.providerID !== providerID
-  ) return
 
   injectTraceContext(request.spanContext, output.headers)
 }

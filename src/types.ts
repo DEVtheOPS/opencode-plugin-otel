@@ -109,6 +109,6 @@ export type HandlerContext = {
   sessionSpanContexts: Map<string, SpanContext>
   messageSpans: Map<string, Span>
   messageOutputs: Map<string, string>
-  llmRequestContexts: Map<string, LlmRequestContext>
+  llmRequestContexts: Map<string, LlmRequestContext[]>
   tracePropagationProviders: Set<string>
 }

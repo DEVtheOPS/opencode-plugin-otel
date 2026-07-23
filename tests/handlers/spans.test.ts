@@ -352,7 +352,7 @@ describe("message (LLM) spans", () => {
     expect(tracer.spans).toHaveLength(1)
     expect(tracer.spans[0]!.name).toBe("opencode.llm")
     expect(ctx.messageSpans.has("ses_1:msg_1")).toBe(true)
-    expect(ctx.llmRequestContexts.get("ses_1:user_1")).toMatchObject({
+    expect(ctx.llmRequestContexts.get("ses_1:user_1")?.[0]).toMatchObject({
       messageID: "msg_1",
       agent: "build",
       modelID: "claude-3-5-sonnet",
@@ -395,7 +395,7 @@ describe("message (LLM) spans", () => {
 
     handleMessageUpdated(makeAssistantMessageUpdated({ id: "msg_1", time: { created: 1000, completed: 2000 } }), ctx)
 
-    expect(ctx.llmRequestContexts.get("ses_1:user_1")?.messageID).toBe("msg_2")
+    expect(ctx.llmRequestContexts.get("ses_1:user_1")?.map(request => request.messageID)).toEqual(["msg_2"])
   })
 
   test("handleMessageUpdated sets OK status on success", () => {
