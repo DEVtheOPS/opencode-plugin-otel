@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [1.4.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.3.1...v1.4.0) (2026-07-23)
+
+
+### Features
+
+* **telemetry:** add canonical GenAI provider names ([39f40fe](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/39f40fe211ac4beaafadffd3c7e1cab11c41e92c))
+* **tracing:** propagate context to LLM providers ([060e403](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/060e403f5c89e7d2b90dc93389f01651fc938637))
+
+
+### Bug Fixes
+
+* **ci:** align Discord workflow permissions ([0af2755](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/0af275586cb50631419a1c3f122acb07993193e5))
+* **tracing:** prefer current LLM request context ([ba7a3af](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/ba7a3af2556a35e1b7f2287efa994b05467ccd56))
+* **tracing:** preserve concurrent LLM contexts ([d755fe3](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/d755fe30c6c5afb7e36c03a8e37c1ba2b62c30b3))
+
 ## [1.3.1](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.3.0...v1.3.1) (2026-07-16)
 
 
