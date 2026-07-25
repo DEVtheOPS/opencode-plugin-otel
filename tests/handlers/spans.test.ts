@@ -10,6 +10,7 @@ import {
   LLM_TOKEN_COUNT_PROMPT,
   LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ,
   LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE,
+  LLM_TOKEN_COUNT_TOTAL,
   OpenInferenceSpanKind,
   SemanticConventions,
   SESSION_ID,
@@ -408,11 +409,12 @@ describe("message (LLM) spans", () => {
       ctx,
     )
     const span = tracer.spans[0]!
-    expect(span.attributes[LLM_TOKEN_COUNT_PROMPT]).toBe(200)
-    expect(span.attributes[LLM_TOKEN_COUNT_COMPLETION]).toBe(80)
+    expect(span.attributes[LLM_TOKEN_COUNT_PROMPT]).toBe(235)
+    expect(span.attributes[LLM_TOKEN_COUNT_COMPLETION]).toBe(90)
     expect(span.attributes[LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING]).toBe(10)
     expect(span.attributes[LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ]).toBe(30)
     expect(span.attributes[LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE]).toBe(5)
+    expect(span.attributes[LLM_TOKEN_COUNT_TOTAL]).toBe(325)
     expect(span.attributes[AGENT_NAME]).toBe("review")
     expect(span.attributes["agent.type"]).toBe("subagent")
   })

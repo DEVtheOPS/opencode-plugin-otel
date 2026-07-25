@@ -70,8 +70,9 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
   const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
   const agent = agentName
 
-  const totalTokens = assistant.tokens.input + assistant.tokens.output + assistant.tokens.reasoning
-    + assistant.tokens.cache.read + assistant.tokens.cache.write
+  const promptTokens = assistant.tokens.input + assistant.tokens.cache.read + assistant.tokens.cache.write
+  const completionTokens = assistant.tokens.output + assistant.tokens.reasoning
+  const totalTokens = promptTokens + completionTokens
 
   if (isMetricEnabled("token.usage", ctx)) {
     const { tokenCounter } = ctx.instruments
@@ -124,8 +125,8 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
     msgSpan.setAttributes({
       [AGENT_NAME]: agentName,
       "agent.type": agentType,
-      [LLM_TOKEN_COUNT_PROMPT]: assistant.tokens.input,
-      [LLM_TOKEN_COUNT_COMPLETION]: assistant.tokens.output,
+      [LLM_TOKEN_COUNT_PROMPT]: promptTokens,
+      [LLM_TOKEN_COUNT_COMPLETION]: completionTokens,
       [LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING]: assistant.tokens.reasoning,
       [LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ]: assistant.tokens.cache.read,
       [LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE]: assistant.tokens.cache.write,
