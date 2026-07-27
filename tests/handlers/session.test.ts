@@ -69,10 +69,10 @@ describe("handleSessionCreated", () => {
     expect(counters.session.calls.at(0)!.attrs["project.id"]).toBe("proj_abc")
   })
 
-  test("attaches span attributes to the session span but not to metrics or logs", async () => {
+  test("attaches span attributes to the subagent session span but not to metrics or logs", async () => {
     const { ctx, counters, tracer, logger } = makeCtx()
     ctx.spanAttributes = { team: "platform" }
-    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    await handleSessionCreated(makeSessionCreated("ses_child", 1000, "ses_parent"), ctx)
     expect(tracer.spans[0]!.attributes["team"]).toBe("platform")
     expect(counters.session.calls.at(0)!.attrs["team"]).toBeUndefined()
     expect(logger.records.at(0)!.attributes?.["team"]).toBeUndefined()
@@ -133,7 +133,7 @@ describe("handleSessionIdle", () => {
   test("records session token and cost histograms when totals exist", async () => {
     const { ctx, gauges } = makeCtx()
     await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 500, tokens: 150, cost: 0.03, messages: 2, agent: "build" })
+    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 500, tokens: 150, cost: 0.03, messages: 2, agent: "build", agentType: "primary" })
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     expect(gauges.sessionToken.calls).toHaveLength(1)
     expect(gauges.sessionToken.calls.at(0)!.value).toBe(150)
@@ -142,18 +142,18 @@ describe("handleSessionIdle", () => {
   })
 
   test("does not scale session.cost.total even when costUsageScale is set", async () => {
-    const { ctx, gauges } = makeCtx("proj_test", [], [], true, 1_000_000)
+    const { ctx, gauges } = makeCtx("proj_test", [], [], true, {}, { costUsageScale: 1_000_000 })
     await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 500, tokens: 150, cost: 0.03, messages: 2, agent: "build" })
+    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 500, tokens: 150, cost: 0.03, messages: 2, agent: "build", agentType: "primary" })
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     expect(gauges.sessionCost.calls).toHaveLength(1)
     expect(gauges.sessionCost.calls.at(0)!.value).toBe(0.03)
   })
 
   test("session.idle log keeps cost in raw USD", async () => {
-    const { ctx, logger } = makeCtx("proj_test", [], [], true, 1_000_000)
+    const { ctx, logger } = makeCtx("proj_test", [], [], true, {}, { costUsageScale: 1_000_000 })
     await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 500, tokens: 150, cost: 0.03, messages: 2, agent: "build" })
+    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 500, tokens: 150, cost: 0.03, messages: 2, agent: "build", agentType: "primary" })
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     const record = logger.records.find(r => r.body === "session.idle")!
     expect(record.attributes?.["total_cost_usd"]).toBe(0.03)
@@ -162,7 +162,7 @@ describe("handleSessionIdle", () => {
   test("emits total_tokens and total_messages in log record attributes", async () => {
     const { ctx, logger } = makeCtx()
     await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 100, tokens: 200, cost: 0.05, messages: 3, agent: "general" })
+    ctx.sessionTotals.set("ses_1", { startMs: Date.now() - 100, tokens: 200, cost: 0.05, messages: 3, agent: "general", agentType: "primary" })
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     const record = logger.records.find(r => r.body === "session.idle")!
     expect(record.attributes?.["total_tokens"]).toBe(200)

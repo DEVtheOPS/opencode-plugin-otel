@@ -7,7 +7,7 @@ import { OTLPMetricExporter as OTLPHttpMetricExporter } from "@opentelemetry/exp
 import { OTLPMetricExporter as OTLPProtoMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto"
 import { OTLPTraceExporter as OTLPHttpTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { OTLPTraceExporter as OTLPProtoTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto"
-import { buildResource, setupOtel, type OtelProviders } from "../src/otel.ts"
+import { buildResource, forceFlushOtel, setupOtel, type OtelProviders } from "../src/otel.ts"
 
 let providers: OtelProviders | undefined
 
@@ -212,5 +212,20 @@ describe("createInstruments cost usage scale", () => {
     const sessionCost = captured.find(c => c.name === "opencode.session.cost.total")!
     expect(sessionCost.options.unit).toBe("USD")
     expect(sessionCost.options.description).not.toContain("1000000")
+  })
+})
+
+describe("forceFlushOtel", () => {
+  test("flushes metrics, logs, and traces", async () => {
+    const calls: string[] = []
+    const fakeProviders = {
+      meterProvider: { forceFlush: async () => { calls.push("metrics") } },
+      loggerProvider: { forceFlush: async () => { calls.push("logs") } },
+      tracerProvider: { forceFlush: async () => { calls.push("traces") } },
+    } as unknown as OtelProviders
+
+    await forceFlushOtel(fakeProviders)
+
+    expect(calls.sort()).toEqual(["logs", "metrics", "traces"])
   })
 })

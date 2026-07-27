@@ -1,33 +1,33 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
-import { parseEnvInt, parseEnvPositiveNumber, loadConfig, resolveHelperPath, resolveLogLevel, parseKeyValueAttributes, TRACE_TYPES } from "../src/config.ts"
+import { parseEnvInt, parseEnvPositiveNumber, loadConfig, resolveHelperPath, resolveLogLevel, parseAttributePairs, TRACE_TYPES } from "../src/config.ts"
 
-describe("parseKeyValueAttributes", () => {
+describe("parseAttributePairs", () => {
   test("returns an empty object when undefined", () => {
-    expect(parseKeyValueAttributes(undefined)).toEqual({})
+    expect(parseAttributePairs(undefined)).toEqual({})
   })
 
   test("returns an empty object for an empty string", () => {
-    expect(parseKeyValueAttributes("")).toEqual({})
+    expect(parseAttributePairs("")).toEqual({})
   })
 
   test("parses comma-separated key=value pairs", () => {
-    expect(parseKeyValueAttributes("a=1,b=2")).toEqual({ a: "1", b: "2" })
+    expect(parseAttributePairs("a=1,b=2")).toEqual({ a: "1", b: "2" })
   })
 
   test("trims whitespace around keys and values", () => {
-    expect(parseKeyValueAttributes(" team = platform , env = prod ")).toEqual({ team: "platform", env: "prod" })
+    expect(parseAttributePairs(" team = platform , env = prod ")).toEqual({ team: "platform", env: "prod" })
   })
 
   test("keeps only the first = as the separator", () => {
-    expect(parseKeyValueAttributes("url=https://x.io/v1?a=b")).toEqual({ url: "https://x.io/v1?a=b" })
+    expect(parseAttributePairs("url=https://x.io/v1?a=b")).toEqual({ url: "https://x.io/v1?a=b" })
   })
 
   test("skips pairs without an = or with an empty key", () => {
-    expect(parseKeyValueAttributes("good=1,nope,=orphan")).toEqual({ good: "1" })
+    expect(parseAttributePairs("good=1,nope,=orphan")).toEqual({ good: "1" })
   })
 
   test("last value wins for duplicate keys", () => {
-    expect(parseKeyValueAttributes("k=1,k=2")).toEqual({ k: "2" })
+    expect(parseAttributePairs("k=1,k=2")).toEqual({ k: "2" })
   })
 })
 
@@ -134,6 +134,7 @@ describe("loadConfig", () => {
     "OPENCODE_METRIC_ATTRIBUTES",
     "OPENCODE_EXCLUDE_METRICS_ATTRIBUTES",
     "OPENCODE_COST_USAGE_SCALE",
+    "OPENCODE_TRACE_PROPAGATION_PROVIDERS",
     "OTEL_EXPORTER_OTLP_HEADERS",
     "OTEL_RESOURCE_ATTRIBUTES",
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
@@ -149,8 +150,8 @@ describe("loadConfig", () => {
     expect(cfg.protocol).toBe("grpc")
     expect(cfg.metricsInterval).toBe(60000)
     expect(cfg.logsInterval).toBe(5000)
-    expect(cfg.spanAttributes).toEqual({})
-    expect(cfg.metricAttributes).toEqual({})
+    expect(cfg.spanAttributes).toBeUndefined()
+    expect(cfg.metricAttributes).toBeUndefined()
     expect(cfg.excludeMetricAttributes).toEqual(new Set())
     expect(cfg.costUsageScale).toBe(1)
   })
@@ -202,14 +203,14 @@ describe("loadConfig", () => {
     }
   })
 
-  test("parses OPENCODE_SPAN_ATTRIBUTES into spanAttributes", () => {
+  test("reads OPENCODE_SPAN_ATTRIBUTES into spanAttributes", () => {
     process.env["OPENCODE_SPAN_ATTRIBUTES"] = "team=platform,env=prod"
-    expect(loadConfig().spanAttributes).toEqual({ team: "platform", env: "prod" })
+    expect(loadConfig().spanAttributes).toBe("team=platform,env=prod")
   })
 
-  test("parses OPENCODE_METRIC_ATTRIBUTES into metricAttributes", () => {
+  test("reads OPENCODE_METRIC_ATTRIBUTES into metricAttributes", () => {
     process.env["OPENCODE_METRIC_ATTRIBUTES"] = "deployment.environment=production"
-    expect(loadConfig().metricAttributes).toEqual({ "deployment.environment": "production" })
+    expect(loadConfig().metricAttributes).toBe("deployment.environment=production")
   })
 
   test("parses OPENCODE_EXCLUDE_METRICS_ATTRIBUTES into excludeMetricAttributes", () => {
@@ -217,12 +218,12 @@ describe("loadConfig", () => {
     expect(loadConfig().excludeMetricAttributes).toEqual(new Set(["session.id", "model"]))
   })
 
-  test("spanAttributes and metricAttributes are parsed independently", () => {
+  test("spanAttributes and metricAttributes are surfaced independently", () => {
     process.env["OPENCODE_SPAN_ATTRIBUTES"] = "team=platform"
     process.env["OPENCODE_METRIC_ATTRIBUTES"] = "env=prod"
     const cfg = loadConfig()
-    expect(cfg.spanAttributes).toEqual({ team: "platform" })
-    expect(cfg.metricAttributes).toEqual({ env: "prod" })
+    expect(cfg.spanAttributes).toBe("team=platform")
+    expect(cfg.metricAttributes).toBe("env=prod")
   })
 
   test("does not copy OPENCODE_SPAN_ATTRIBUTES into OTEL_RESOURCE_ATTRIBUTES", () => {
@@ -458,6 +459,158 @@ describe("loadConfig", () => {
   test('disabledTraces expands numeric-style value "1" to every known trace type', () => {
     process.env["OPENCODE_DISABLE_TRACES"] = "1"
     expect(loadConfig().disabledTraces).toEqual(new Set(TRACE_TYPES))
+  })
+
+  test("tracePropagationProviders is empty when unset", () => {
+    expect(loadConfig().tracePropagationProviders).toEqual(new Set())
+  })
+
+  test("parses trace propagation providers", () => {
+    process.env["OPENCODE_TRACE_PROPAGATION_PROVIDERS"] = " company-litellm , vllm "
+    expect(loadConfig().tracePropagationProviders).toEqual(new Set(["company-litellm", "vllm"]))
+  })
+})
+
+describe("loadConfig options", () => {
+  const vars = [
+    "OPENCODE_ENABLE_TELEMETRY",
+    "OPENCODE_OTLP_ENDPOINT",
+    "OPENCODE_OTLP_PROTOCOL",
+    "OPENCODE_OTLP_METRICS_INTERVAL",
+    "OPENCODE_OTLP_LOGS_INTERVAL",
+    "OPENCODE_METRIC_PREFIX",
+    "OPENCODE_OTLP_HEADERS",
+    "OPENCODE_RESOURCE_ATTRIBUTES",
+    "OPENCODE_OTLP_METRICS_TEMPORALITY",
+    "OPENCODE_DISABLE_METRICS",
+    "OPENCODE_DISABLE_LOGS",
+    "OPENCODE_DISABLE_TRACES",
+    "OPENCODE_TRACE_PROPAGATION_PROVIDERS",
+    "OTEL_EXPORTER_OTLP_HEADERS",
+    "OTEL_RESOURCE_ATTRIBUTES",
+    "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
+  ]
+  beforeEach(() => vars.forEach((k) => delete process.env[k]))
+  afterEach(() => vars.forEach((k) => delete process.env[k]))
+
+  test("enabled via option without any env var", () => {
+    expect(loadConfig({ enabled: true }).enabled).toBe(true)
+  })
+
+  test("option enabled:false overrides an enabling env var", () => {
+    process.env["OPENCODE_ENABLE_TELEMETRY"] = "1"
+    expect(loadConfig({ enabled: false }).enabled).toBe(false)
+  })
+
+  test("option logsEnabled:false disables logs", () => {
+    expect(loadConfig({ logsEnabled: false }).logsEnabled).toBe(false)
+  })
+
+  test("option endpoint overrides env var", () => {
+    process.env["OPENCODE_OTLP_ENDPOINT"] = "http://from-env:4317"
+    expect(loadConfig({ endpoint: "http://from-option:4317" }).endpoint).toBe("http://from-option:4317")
+  })
+
+  test("env endpoint used when option is absent", () => {
+    process.env["OPENCODE_OTLP_ENDPOINT"] = "http://from-env:4317"
+    expect(loadConfig({ metricPrefix: "x." }).endpoint).toBe("http://from-env:4317")
+  })
+
+  test("option protocol overrides env var", () => {
+    process.env["OPENCODE_OTLP_PROTOCOL"] = "grpc"
+    expect(loadConfig({ protocol: "http/protobuf" }).protocol).toBe("http/protobuf")
+  })
+
+  test("option intervals override env vars", () => {
+    process.env["OPENCODE_OTLP_METRICS_INTERVAL"] = "30000"
+    const cfg = loadConfig({ metricsInterval: 15000, logsInterval: 2500 })
+    expect(cfg.metricsInterval).toBe(15000)
+    expect(cfg.logsInterval).toBe(2500)
+  })
+
+  test("invalid option interval falls back to env then default", () => {
+    process.env["OPENCODE_OTLP_METRICS_INTERVAL"] = "45000"
+    const cfg = loadConfig({ metricsInterval: 0, logsInterval: -1 })
+    expect(cfg.metricsInterval).toBe(45000)
+    expect(cfg.logsInterval).toBe(5000)
+  })
+
+  test("non-number option interval is ignored", () => {
+    const cfg = loadConfig({ metricsInterval: "soon" } as unknown as Parameters<typeof loadConfig>[0])
+    expect(cfg.metricsInterval).toBe(60000)
+  })
+
+  test("null options are handled safely", () => {
+    expect(() => loadConfig(null as unknown as Parameters<typeof loadConfig>[0])).not.toThrow()
+    expect(loadConfig(null as unknown as Parameters<typeof loadConfig>[0]).endpoint).toBe("http://localhost:4317")
+  })
+
+  test("option metricPrefix overrides env var", () => {
+    process.env["OPENCODE_METRIC_PREFIX"] = "env."
+    expect(loadConfig({ metricPrefix: "claude_code." }).metricPrefix).toBe("claude_code.")
+  })
+
+  test("option otlpHeaders is copied to OTEL_EXPORTER_OTLP_HEADERS", () => {
+    const cfg = loadConfig({ otlpHeaders: "api-key=opt" })
+    expect(cfg.otlpHeaders).toBe("api-key=opt")
+    expect(process.env["OTEL_EXPORTER_OTLP_HEADERS"]).toBe("api-key=opt")
+  })
+
+  test("option resourceAttributes is copied to OTEL_RESOURCE_ATTRIBUTES", () => {
+    const cfg = loadConfig({ resourceAttributes: "team=platform" })
+    expect(cfg.resourceAttributes).toBe("team=platform")
+    expect(process.env["OTEL_RESOURCE_ATTRIBUTES"]).toBe("team=platform")
+  })
+
+  test("option metricsTemporality is normalized and copied to OTEL preference", () => {
+    const cfg = loadConfig({ metricsTemporality: "delta" })
+    expect(cfg.metricsTemporality).toBe("delta")
+    expect(process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]).toBe("delta")
+  })
+
+  test("invalid protocol option falls back to env then default", () => {
+    process.env["OPENCODE_OTLP_PROTOCOL"] = "http/json"
+    expect(loadConfig({ protocol: "ftp" as never }).protocol).toBe("http/json")
+    delete process.env["OPENCODE_OTLP_PROTOCOL"]
+    expect(loadConfig({ protocol: "ftp" as never }).protocol).toBe("grpc")
+  })
+
+  test("invalid metricsTemporality option falls back to env then default", () => {
+    process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"] = "lowmemory"
+    expect(loadConfig({ metricsTemporality: "weekly" as never }).metricsTemporality).toBe("lowmemory")
+    delete process.env["OPENCODE_OTLP_METRICS_TEMPORALITY"]
+    expect(loadConfig({ metricsTemporality: "weekly" as never }).metricsTemporality).toBeUndefined()
+  })
+
+  test("option disabledMetrics array overrides env var", () => {
+    process.env["OPENCODE_DISABLE_METRICS"] = "session.count"
+    const { disabledMetrics } = loadConfig({ disabledMetrics: ["cache.count", "retry.count"] })
+    expect(disabledMetrics).toEqual(new Set(["cache.count", "retry.count"]))
+  })
+
+  test("option disabledTraces array expands all to every trace type", () => {
+    expect(loadConfig({ disabledTraces: ["all"] }).disabledTraces).toEqual(new Set(TRACE_TYPES))
+  })
+
+  test("option disabledTraces array trims and lowercases entries", () => {
+    const { disabledTraces } = loadConfig({ disabledTraces: [" LLM ", "Tool"] })
+    expect(disabledTraces).toEqual(new Set(["llm", "tool"]))
+  })
+
+  test("option tracePropagationProviders overrides the env var", () => {
+    process.env["OPENCODE_TRACE_PROPAGATION_PROVIDERS"] = "env-provider"
+    const { tracePropagationProviders } = loadConfig({
+      tracePropagationProviders: [" company-litellm ", "vllm"],
+    })
+    expect(tracePropagationProviders).toEqual(new Set(["company-litellm", "vllm"]))
+  })
+
+  test("env values still apply when no options are passed", () => {
+    process.env["OPENCODE_ENABLE_TELEMETRY"] = "1"
+    process.env["OPENCODE_OTLP_ENDPOINT"] = "http://env:4317"
+    const cfg = loadConfig()
+    expect(cfg.enabled).toBe(true)
+    expect(cfg.endpoint).toBe("http://env:4317")
   })
 })
 

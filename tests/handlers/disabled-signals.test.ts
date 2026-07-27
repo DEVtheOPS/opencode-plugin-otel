@@ -106,7 +106,7 @@ describe("disabled traces", () => {
   test("disabling all three trace types suppresses every span", async () => {
     const { ctx, tracer } = makeCtx("proj_test", [], ["session", "llm", "tool"])
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    startMessageSpan("ses_1", "msg_1", "claude-3-5-sonnet", "anthropic", 1000, ctx)
+    startMessageSpan("ses_1", "msg_1", "user_1", "claude-3-5-sonnet", "anthropic", 1000, ctx)
     await handleMessagePartUpdated(makeToolPartUpdated("running"), ctx)
     expect(tracer.spans).toHaveLength(0)
   })

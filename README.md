@@ -14,9 +14,11 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
   - [Log events](#log-events)
 - [Installation](#installation)
 - [Configuration](#configuration)
+  - [Plugin options (opencode.json)](#plugin-options-opencodejson)
   - [Quick start](#quick-start)
   - [Headers and resource attributes](#headers-and-resource-attributes)
   - [Dynamic headers](#dynamic-headers)
+  - [LLM trace propagation](#llm-trace-propagation)
   - [Disabling specific metrics](#disabling-specific-metrics)
   - [Disabling OTLP logs (`OPENCODE_DISABLE_LOGS`)](#disabling-otlp-logs)
   - [Disabling traces (`OPENCODE_DISABLE_TRACES`)](#disabling-traces)
@@ -85,7 +87,9 @@ Or point directly at a local checkout for development:
 
 ## Configuration
 
-All configuration is via environment variables. Set them in your shell profile (`~/.zshrc`, `~/.bashrc`, etc.).
+The plugin reads its settings from `OPENCODE_*` environment variables and/or from inline [plugin options](#plugin-options-opencodejson) in `opencode.json`. When both are present, an option wins over the matching environment variable, which wins over the built-in default.
+
+The environment variables (set them in your shell profile — `~/.zshrc`, `~/.bashrc`, etc.):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -108,6 +112,51 @@ All configuration is via environment variables. Set them in your shell profile (
 | `OPENCODE_COST_USAGE_SCALE` | `1` | Multiplier applied to USD cost values before they are recorded as the `cost.usage` counter. Set to `1000000` for backends that round metric values to one decimal place (e.g. AppSignal) so per-message cents land as whole numbers. Only affects `cost.usage` — `session.cost.total`, spans, and log events keep raw USD. Divide by this value in dashboards to display dollars. |
 | `OPENCODE_TRACEPARENT` | *(unset)* | W3C [`traceparent`](https://www.w3.org/TR/trace-context/#traceparent-header) string. When set, all spans are parented under this remote context so opencode traces nest inside a caller's trace (e.g. a CI job). Invalid values are logged and ignored. Note: with the default `ParentBased` sampler, a value with the sampled flag off (`...-00`) suppresses all trace export. |
 | `OPENCODE_TRACESTATE` | *(unset)* | W3C [`tracestate`](https://www.w3.org/TR/trace-context/#tracestate-header) string, parsed alongside `OPENCODE_TRACEPARENT` and attached to the remote parent context. Ignored unless a valid `OPENCODE_TRACEPARENT` is also set. |
+| `OPENCODE_TRACE_PROPAGATION_PROVIDERS` | *(unset)* | Comma-separated opencode provider IDs that receive W3C `traceparent` and `tracestate` headers on LLM requests. Use `*` to explicitly enable every provider. |
+
+### Plugin options (opencode.json)
+
+Every setting can also be passed inline through opencode's plugin **tuple form**, so nothing has to be exported in a shell. Options take precedence over the matching `OPENCODE_*` environment variable, which in turn wins over the built-in default.
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ["@devtheops/opencode-plugin-otel", {
+      "enabled": true,
+      "endpoint": "http://localhost:4317",
+      "protocol": "grpc",
+      "metricPrefix": "claude_code.",
+      "resourceAttributes": "service.version=1.2.3,deployment.environment=production",
+      "disabledTraces": ["tool"]
+    }]
+  ]
+}
+```
+
+Option keys mirror the resolved config and map to the environment variables:
+
+| Option | Environment variable |
+|--------|----------------------|
+| `enabled` | `OPENCODE_ENABLE_TELEMETRY` |
+| `logsEnabled` | `OPENCODE_DISABLE_LOGS` (inverted) |
+| `endpoint` | `OPENCODE_OTLP_ENDPOINT` |
+| `protocol` | `OPENCODE_OTLP_PROTOCOL` |
+| `metricsInterval` | `OPENCODE_OTLP_METRICS_INTERVAL` |
+| `logsInterval` | `OPENCODE_OTLP_LOGS_INTERVAL` |
+| `metricPrefix` | `OPENCODE_METRIC_PREFIX` |
+| `otlpHeaders` | `OPENCODE_OTLP_HEADERS` |
+| `otlpHeadersHelper` | `OPENCODE_OTLP_HEADERS_HELPER` |
+| `resourceAttributes` | `OPENCODE_RESOURCE_ATTRIBUTES` |
+| `spanAttributes` | `OPENCODE_SPAN_ATTRIBUTES` |
+| `traceparent` | `OPENCODE_TRACEPARENT` |
+| `tracestate` | `OPENCODE_TRACESTATE` |
+| `metricsTemporality` | `OPENCODE_OTLP_METRICS_TEMPORALITY` |
+| `disabledMetrics` | `OPENCODE_DISABLE_METRICS` (array, not a comma string) |
+| `disabledTraces` | `OPENCODE_DISABLE_TRACES` (array, not a comma string) |
+| `tracePropagationProviders` | `OPENCODE_TRACE_PROPAGATION_PROVIDERS` (array, not a comma string) |
+
+> **Security note:** `opencode.json` is frequently committed to version control. Keep secrets such as `otlpHeaders` in an environment variable or an opencode `{env:VAR}` substitution (e.g. `"otlpHeaders": "{env:OTEL_HEADERS}"`) rather than inline.
 
 ### Quick start
 
@@ -166,6 +215,18 @@ printf '{"Authorization":"Bearer %s"}' "$(get-token.sh)"
 For a Cloud Run collector using IAM authentication, `get-token.sh` might be `gcloud auth print-identity-token`.
 
 If `OPENCODE_OTLP_HEADERS` is also set, helper-provided headers override static headers with the same name. Header values are never logged.
+
+### LLM trace propagation
+
+Use `OPENCODE_TRACE_PROPAGATION_PROVIDERS` to connect this plugin's LLM spans to spans emitted by an LLM gateway such as LiteLLM or vLLM. For matching provider IDs, the plugin injects the current `opencode.llm` span as the W3C `traceparent` header and includes `tracestate` when present.
+
+```bash
+export OPENCODE_TRACE_PROPAGATION_PROVIDERS="company-litellm,vllm"
+```
+
+The values are opencode provider IDs, including custom names configured under the `provider` key in `opencode.json`. Propagation is disabled when the setting is unset. Use `*` only when every configured provider should receive trace context.
+
+Only W3C trace context is propagated. The plugin does not inject arbitrary headers or W3C baggage. Configure static provider-specific headers through the provider's native `options.headers` setting in `opencode.json`.
 
 ### Disabling specific metrics
 

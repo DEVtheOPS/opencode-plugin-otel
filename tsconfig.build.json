@@ -1,12 +1,19 @@
 {
-  "extends": "./tsconfig.json",
   "compilerOptions": {
-    "noEmit": false,
     "declaration": true,
     "emitDeclarationOnly": true,
+    "noEmit": false,
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src"],
-  "exclude": ["eslint.config.mjs", "dist", "scripts", "tests"]
+  "exclude": [
+    "eslint.config.mjs",
+    "dist",
+    "scripts",
+    "tests"
+  ],
+  "extends": "./tsconfig.json",
+  "include": [
+    "src"
+  ]
 }

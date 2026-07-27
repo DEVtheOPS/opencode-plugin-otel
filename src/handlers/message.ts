@@ -1,5 +1,5 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
-import { SpanStatusCode, SpanKind, trace } from "@opentelemetry/api"
+import { SpanStatusCode, SpanKind } from "@opentelemetry/api"
 import type { AssistantMessage, EventMessageUpdated, EventMessagePartUpdated, ToolPart } from "@opencode-ai/sdk"
 import {
   AGENT_NAME,
@@ -27,7 +27,17 @@ import {
   TOOL_NAME,
   TOOL_PARAMETERS,
 } from "@arizeai/openinference-semantic-conventions"
-import { errorSummary, setBoundedMap, accumulateSessionTotals, isMetricEnabled, isTraceEnabled } from "../util.ts"
+import {
+  agentAttrs,
+  errorSummary,
+  genAiProviderName,
+  setBoundedMap,
+  accumulateSessionTotals,
+  getSessionAgentMeta,
+  isMetricEnabled,
+  isTraceEnabled,
+  resolveSessionTraceContext,
+} from "../util.ts"
 import type { HandlerContext } from "../types.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
@@ -52,11 +62,13 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
   const msg = e.properties.info
   if (msg.role !== "assistant") return
   const assistant = msg as AssistantMessage
+  setBoundedMap(ctx.assistantRuns, assistant.id, assistant.parentID)
   if (!assistant.time.completed) return
 
   const { sessionID, modelID, providerID } = assistant
   const duration = assistant.time.completed - assistant.time.created
-  const agent = ctx.sessionTotals.get(sessionID)?.agent ?? "unknown"
+  const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
+  const agent = agentName
 
   const totalTokens = assistant.tokens.input + assistant.tokens.output + assistant.tokens.reasoning
     + assistant.tokens.cache.read + assistant.tokens.cache.write
@@ -121,6 +133,8 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
   if (msgSpan) {
     const outputText = ctx.messageOutputs.get(msgKey)
     msgSpan.setAttributes({
+      [AGENT_NAME]: agentName,
+      "agent.type": agentType,
       [LLM_TOKEN_COUNT_PROMPT]: assistant.tokens.input,
       [LLM_TOKEN_COUNT_COMPLETION]: assistant.tokens.output,
       [LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING]: assistant.tokens.reasoning,
@@ -148,6 +162,13 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
     ctx.messageSpans.delete(msgKey)
     ctx.messageOutputs.delete(msgKey)
   }
+  const requestKey = `${sessionID}:${assistant.parentID}`
+  const remainingRequests = ctx.llmRequestContexts.get(requestKey)?.filter(request => request.messageID !== assistant.id)
+  if (remainingRequests?.length) {
+    setBoundedMap(ctx.llmRequestContexts, requestKey, remainingRequests)
+  } else {
+    ctx.llmRequestContexts.delete(requestKey)
+  }
 
   if (assistant.error) {
     ctx.emitLog({
@@ -161,7 +182,8 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
         "session.id": sessionID,
         model: modelID,
         provider: providerID,
-        agent,
+        "gen_ai.provider.name": genAiProviderName(providerID),
+        ...agentAttrs(agentName, agentType),
         error: errorSummary(assistant.error),
         duration_ms: duration,
         ...ctx.commonAttrs,
@@ -187,7 +209,8 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
       "session.id": sessionID,
       model: modelID,
       provider: providerID,
-      agent,
+      "gen_ai.provider.name": genAiProviderName(providerID),
+      ...agentAttrs(agentName, agentType),
       cost_usd: assistant.cost,
       duration_ms: duration,
       input_tokens: assistant.tokens.input,
@@ -235,6 +258,7 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
         ...ctx.commonAttrs,
         "session.id": subtask.sessionID,
         agent: subtask.agent,
+        "agent.type": "subagent",
       })
     }
     ctx.emitLog({
@@ -246,7 +270,7 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
       attributes: {
         "event.name": "subtask_invoked",
         "session.id": subtask.sessionID,
-        agent: subtask.agent,
+        ...agentAttrs(subtask.agent, "subagent"),
         description: subtask.description,
         prompt_length: subtask.prompt.length,
         ...ctx.commonAttrs,
@@ -264,13 +288,9 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
     const key = `${toolPart.sessionID}:${toolPart.callID}`
 
     if (toolPart.state.status === "running") {
+      const { agentName, agentType } = getSessionAgentMeta(toolPart.sessionID, ctx)
       const toolSpan = isTraceEnabled("tool", ctx)
         ? (() => {
-            const sessionSpan = ctx.sessionSpans.get(toolPart.sessionID)
-            const baseCtx = ctx.rootContext()
-            const parentCtx = sessionSpan
-              ? trace.setSpan(baseCtx, sessionSpan)
-              : baseCtx
             return ctx.tracer.startSpan(
               `${ctx.tracePrefix}tool.${toolPart.tool}`,
               {
@@ -284,11 +304,15 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
                   [TOOL_PARAMETERS]: JSON.stringify(toolPart.state.input),
                   [INPUT_VALUE]: JSON.stringify(toolPart.state.input),
                   [INPUT_MIME_TYPE]: MimeType.JSON,
+                  [AGENT_NAME]: agentName,
+                  "agent.type": agentType,
                   ...ctx.commonAttrs,
                   ...ctx.spanAttributes,
                 },
               },
-              parentCtx,
+              resolveSessionTraceContext(toolPart.sessionID, ctx, {
+                assistantMessageID: toolPart.messageID,
+              }),
             )
           })()
         : undefined
@@ -311,6 +335,7 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
     if (end === undefined) return
     const duration_ms = end - start
     const success = toolPart.state.status === "completed"
+    const { agentName, agentType } = getSessionAgentMeta(toolPart.sessionID, ctx)
 
     if (isMetricEnabled("tool.duration", ctx)) {
       ctx.instruments.toolDurationHistogram.record(duration_ms, {
@@ -323,11 +348,6 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
 
     if (isTraceEnabled("tool", ctx)) {
       const toolSpan = pending?.span ?? (() => {
-        const sessionSpan = ctx.sessionSpans.get(toolPart.sessionID)
-        const baseCtx = ctx.rootContext()
-        const parentCtx = sessionSpan
-          ? trace.setSpan(baseCtx, sessionSpan)
-          : baseCtx
         return ctx.tracer.startSpan(
           `${ctx.tracePrefix}tool.${toolPart.tool}`,
           {
@@ -345,9 +365,12 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
               ...ctx.spanAttributes,
             },
           },
-          parentCtx,
+          resolveSessionTraceContext(toolPart.sessionID, ctx, {
+            assistantMessageID: toolPart.messageID,
+          }),
         )
       })()
+      toolSpan.setAttributes({ [AGENT_NAME]: agentName, "agent.type": agentType })
       toolSpan.setAttribute("tool.success", success)
       if (success) {
         const output = (toolPart.state as { output: string }).output
@@ -383,6 +406,7 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
         "event.name": "tool_result",
         "session.id": toolPart.sessionID,
         tool_name: toolPart.tool,
+        ...agentAttrs(agentName, agentType),
         success,
         duration_ms,
         ...sizeAttr,
@@ -406,27 +430,28 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
 
 /**
  * Starts an LLM span for an assistant message when it first appears in `message.updated`.
- * The span is parented to the session span and carries `gen_ai.*` semantic attributes for
- * the model and provider. It is ended in `handleMessageUpdated` once the message completes.
+ * The span is parented to the active run or subagent span and carries `gen_ai.*` semantic
+ * attributes for the model and provider. It is ended in `handleMessageUpdated` once the
+ * message completes.
  *
  * Only called for assistant messages that have not yet completed (`time.completed` absent).
  */
 export function startMessageSpan(
   sessionID: string,
   messageID: string,
+  parentID: string,
   modelID: string,
   providerID: string,
   startTime: number,
   ctx: HandlerContext,
+  agent?: string,
 ) {
   if (!isTraceEnabled("llm", ctx)) return
   const msgKey = `${sessionID}:${messageID}`
   if (ctx.messageSpans.has(msgKey)) return
-  const sessionSpan = ctx.sessionSpans.get(sessionID)
-  const baseCtx = ctx.rootContext()
-  const parentCtx = sessionSpan
-    ? trace.setSpan(baseCtx, sessionSpan)
-    : baseCtx
+  setBoundedMap(ctx.assistantRuns, messageID, parentID)
+  const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
+  const inputText = ctx.runInputs.get(parentID)
 
   const msgSpan = ctx.tracer.startSpan(
     `${ctx.tracePrefix}llm`,
@@ -436,22 +461,35 @@ export function startMessageSpan(
       attributes: {
         [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.LLM,
         [SESSION_ID]: sessionID,
-        [AGENT_NAME]: ctx.sessionTotals.get(sessionID)?.agent ?? "unknown",
+        [AGENT_NAME]: agentName,
+        "agent.type": agentType,
         [LLM_SYSTEM]: providerID,
         [LLM_PROVIDER]: providerID,
+        "gen_ai.provider.name": genAiProviderName(providerID),
         [LLM_MODEL_NAME]: modelID,
-        ...(ctx.sessionInputs.has(sessionID)
+        ...(inputText
           ? {
-              [INPUT_VALUE]: ctx.sessionInputs.get(sessionID)!,
+              [INPUT_VALUE]: inputText,
               [INPUT_MIME_TYPE]: MimeType.TEXT,
-              [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: ctx.sessionInputs.get(sessionID)! }]),
+              [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: inputText }]),
             }
           : {}),
         ...ctx.commonAttrs,
         ...ctx.spanAttributes,
       },
     },
-    parentCtx,
+    resolveSessionTraceContext(sessionID, ctx, { runID: parentID, assistantMessageID: messageID }),
   )
   setBoundedMap(ctx.messageSpans, msgKey, msgSpan)
+  const requestKey = `${sessionID}:${parentID}`
+  setBoundedMap(ctx.llmRequestContexts, requestKey, [
+    ...(ctx.llmRequestContexts.get(requestKey) ?? []),
+    {
+      messageID,
+      agent: agent ?? agentName,
+      modelID,
+      providerID,
+      spanContext: msgSpan.spanContext(),
+    },
+  ])
 }

@@ -36,6 +36,7 @@ export type SpySpan = {
   status: SpanStatus
   attributes: Record<string, unknown>
   parentSpan: SpySpan | undefined
+  parentSpanContext: SpanContext | undefined
   setStatus(status: SpanStatus): SpySpan
   setAttribute(key: string, value: unknown): SpySpan
   setAttributes(attrs: Attributes): SpySpan
@@ -80,7 +81,18 @@ function makePluginLog(): SpyPluginLog {
   return spy
 }
 
-function makeSpan(name: string, startTime?: number, parentSpan?: SpySpan): SpySpan {
+function makeSpan(
+  name: string,
+  startTime?: number,
+  parentSpan?: SpySpan,
+  parentSpanContext?: SpanContext,
+  ownSpanContext?: SpanContext,
+): SpySpan {
+  const context = ownSpanContext ?? {
+    traceId: "00000000000000000000000000000001",
+    spanId: "0000000000000001",
+    traceFlags: 1,
+  }
   const span: SpySpan = {
     name,
     startTime,
@@ -89,12 +101,13 @@ function makeSpan(name: string, startTime?: number, parentSpan?: SpySpan): SpySp
     status: { code: SpanStatusCode.UNSET },
     attributes: {},
     parentSpan,
+    parentSpanContext,
     setStatus(s) { span.status = s; return span },
     setAttribute(k, v) { span.attributes[k] = v; return span },
     setAttributes(attrs) { Object.assign(span.attributes, attrs); return span },
     end(t) { span.ended = true; span.endTime = t },
     isRecording() { return !span.ended },
-    spanContext() { return { traceId: "00000000000000000000000000000001", spanId: "0000000000000001", traceFlags: 1 } },
+    spanContext() { return context },
     addEvent() { return span },
     recordException() { return span },
     updateName(n) { span.name = n; return span },
@@ -103,14 +116,24 @@ function makeSpan(name: string, startTime?: number, parentSpan?: SpySpan): SpySp
 }
 
 export function makeTracer(): SpyTracer {
+  let nextSpanID = 1
   const tracer: SpyTracer = {
     spans: [],
     startSpan(name, options, ctx) {
       const parentFromCtx = ctx ? trace.getSpan(ctx) as SpySpan | undefined : undefined
+      const parentSpanContext = ctx ? trace.getSpanContext(ctx) ?? undefined : undefined
+      const ownSpanContext: SpanContext = {
+        traceId: parentSpanContext?.traceId ?? "00000000000000000000000000000001",
+        spanId: (nextSpanID++).toString(16).padStart(16, "0"),
+        traceFlags: parentSpanContext?.traceFlags ?? 1,
+        ...(parentSpanContext?.traceState ? { traceState: parentSpanContext.traceState } : {}),
+      }
       const span = makeSpan(
         name,
         typeof options?.startTime === "number" ? options.startTime : undefined,
         parentFromCtx,
+        parentSpanContext,
+        ownSpanContext,
       )
       if (options?.attributes) Object.assign(span.attributes, options.attributes)
       tracer.spans.push(span)
@@ -148,7 +171,21 @@ export type MockContext = {
   tracer: SpyTracer
 }
 
-export function makeCtx(projectID = "proj_test", disabledMetrics: string[] = [], disabledTraces: string[] = [], logsEnabled = true, costUsageScale = 1): MockContext {
+export type MakeCtxOverrides = {
+  costUsageScale?: number
+  spanAttributes?: Record<string, string>
+  metricAttributes?: Record<string, string>
+  excludeMetricAttributes?: Set<string>
+}
+
+export function makeCtx(
+  projectID = "proj_test",
+  disabledMetrics: string[] = [],
+  disabledTraces: string[] = [],
+  logsEnabled = true,
+  extraCommonAttrs: Record<string, string> = {},
+  overrides: MakeCtxOverrides = {},
+): MockContext {
   const session = makeCounter()
   const token = makeCounter()
   const cost = makeCounter()
@@ -193,22 +230,32 @@ export function makeCtx(projectID = "proj_test", disabledMetrics: string[] = [],
       logger.emit(record)
     },
     instruments,
-    commonAttrs: { "project.id": projectID },
+    commonAttrs: { "project.id": projectID, ...extraCommonAttrs },
     pendingToolSpans: new Map(),
     pendingPermissions: new Map(),
     sessionTotals: new Map(),
     sessionDiffTotals: new Map(),
     disabledMetrics: new Set(disabledMetrics),
     disabledTraces: new Set(disabledTraces),
-    spanAttributes: {},
+    spanAttributes: overrides.spanAttributes ?? {},
+    metricAttributes: overrides.metricAttributes ?? {},
+    excludeMetricAttributes: overrides.excludeMetricAttributes ?? new Set(),
+    costUsageScale: overrides.costUsageScale ?? 1,
     tracer: tracer as unknown as Tracer,
     tracePrefix: "opencode.",
     rootContext: () => ROOT_CONTEXT,
+    runSpans: new Map(),
+    runSpanContexts: new Map(),
+    activeRuns: new Map(),
+    assistantRuns: new Map(),
+    pendingRuns: new Map(),
+    runInputs: new Map(),
     sessionSpans: new Map(),
+    sessionSpanContexts: new Map(),
     messageSpans: new Map(),
-    sessionInputs: new Map(),
     messageOutputs: new Map(),
-    costUsageScale,
+    llmRequestContexts: new Map(),
+    tracePropagationProviders: new Set(),
   }
 
   return {

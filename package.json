@@ -8,17 +8,17 @@
     "@opencode-ai/plugin": "^1.14.20",
     "@opencode-ai/sdk": "^1.14.20",
     "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/core": "^2.6.0",
+    "@opentelemetry/core": "^2.8.0",
     "@opentelemetry/exporter-logs-otlp-grpc": "^0.213.0",
     "@opentelemetry/exporter-logs-otlp-http": "^0.213.0",
-    "@opentelemetry/exporter-logs-otlp-proto": "^0.213.0",
-    "@opentelemetry/exporter-metrics-otlp-grpc": "^0.213.0",
+    "@opentelemetry/exporter-logs-otlp-proto": "^0.219.0",
+    "@opentelemetry/exporter-metrics-otlp-grpc": "^0.219.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.213.0",
     "@opentelemetry/exporter-metrics-otlp-proto": "^0.213.0",
     "@opentelemetry/exporter-trace-otlp-grpc": "^0.213.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.213.0",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.213.0",
-    "@opentelemetry/resources": "^2.6.0",
+    "@opentelemetry/resources": "^2.8.0",
     "@opentelemetry/sdk-logs": "^0.213.0",
     "@opentelemetry/sdk-metrics": "^2.6.0",
     "@opentelemetry/sdk-trace-base": "^2.6.0",
@@ -28,18 +28,18 @@
   "description": "OpenTelemetry telemetry plugin for opencode CLI",
   "devDependencies": {
     "@types/bun": "latest",
-    "@typescript-eslint/parser": "^8.30.1",
+    "@typescript-eslint/parser": "^8.62.0",
     "eslint": "^9.24.0",
     "eslint-plugin-jsdoc": "^50.6.11"
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
     },
     "./server": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
     }
   },
   "files": [
@@ -57,7 +57,6 @@
   "license": "MPL-2.0",
   "main": "dist/index.js",
   "module": "dist/index.js",
-  "types": "dist/index.d.ts",
   "name": "@multiwoven-user/opencode-plugin-otel",
   "oc-plugin": [
     "server"
@@ -73,9 +72,10 @@
     "build": "bun build src/index.ts --outdir=./dist --target=node && tsc -p tsconfig.build.json",
     "check:jsdoc-coverage": "bun scripts/check-jsdoc-coverage.mjs",
     "lint": "bun --bun eslint .",
-    "typecheck": "tsc --noEmit",
-    "prepack": "bun run build"
+    "prepack": "bun run build",
+    "typecheck": "tsc --noEmit"
   },
   "type": "module",
-  "version": "1.0.1"
+  "types": "dist/index.d.ts",
+  "version": "1.4.0"
 }

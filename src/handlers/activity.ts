@@ -1,6 +1,6 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import type { EventSessionDiff, EventCommandExecuted } from "@opencode-ai/sdk"
-import { isMetricEnabled, setBoundedMap } from "../util.ts"
+import { agentAttrs, getSessionAgentMeta, isMetricEnabled, setBoundedMap } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
 
 /**
@@ -69,6 +69,7 @@ export function handleCommandExecuted(e: EventCommandExecuted, ctx: HandlerConte
   if (e.properties.name !== "bash") return
   ctx.log("debug", "otel: command.executed (bash)", { sessionID: e.properties.sessionID, argumentsLength: e.properties.arguments.length })
   if (!GIT_COMMIT_RE.test(e.properties.arguments)) return
+  const { agentName, agentType } = getSessionAgentMeta(e.properties.sessionID, ctx)
 
   if (isMetricEnabled("commit.count", ctx)) {
     ctx.instruments.commitCounter.add(1, {
@@ -86,6 +87,7 @@ export function handleCommandExecuted(e: EventCommandExecuted, ctx: HandlerConte
     attributes: {
       "event.name": "commit",
       "session.id": e.properties.sessionID,
+      ...agentAttrs(agentName, agentType),
       ...ctx.commonAttrs,
     },
   })

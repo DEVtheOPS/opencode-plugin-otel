@@ -17,6 +17,7 @@ import { resourceFromAttributes } from "@opentelemetry/resources"
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions"
 import { ATTR_HOST_ARCH } from "@opentelemetry/semantic-conventions/incubating"
 import type { Instruments } from "./types.ts"
+import { parseAttributePairs } from "./config.ts"
 import {
   createGrpcMetadata,
   DynamicHeaders,
@@ -38,17 +39,7 @@ export function buildResource(version: string) {
     "app.version": version,
     "os.type": process.platform,
     [ATTR_HOST_ARCH]: process.arch,
-  }
-  const raw = process.env["OTEL_RESOURCE_ATTRIBUTES"]
-  if (raw) {
-    for (const pair of raw.split(",")) {
-      const idx = pair.indexOf("=")
-      if (idx > 0) {
-        const key = pair.slice(0, idx).trim()
-        const val = pair.slice(idx + 1).trim()
-        if (key) attrs[key] = val
-      }
-    }
+    ...parseAttributePairs(process.env["OTEL_RESOURCE_ATTRIBUTES"]),
   }
   return resourceFromAttributes(attrs)
 }
@@ -58,6 +49,14 @@ export type OtelProviders = {
   meterProvider: MeterProvider
   loggerProvider: LoggerProvider
   tracerProvider: BasicTracerProvider
+}
+
+export async function forceFlushOtel(providers: OtelProviders) {
+  await Promise.allSettled([
+    providers.meterProvider.forceFlush(),
+    providers.loggerProvider.forceFlush(),
+    providers.tracerProvider.forceFlush(),
+  ])
 }
 
 export function buildHttpSignalUrl(endpoint: string, signal: "traces" | "metrics" | "logs") {
@@ -246,6 +245,9 @@ export function createInstruments(
     sessionCostGauge: histogram(`${prefix}session.cost.total`, {
       unit: "USD",
       description: "Total cost per session in USD, recorded as a histogram on session idle",
+      advice: {
+        explicitBucketBoundaries: [0.01, 0.05, 0.10, 0.25, 0.50, 1.00, 2.50, 5.00, 10.00, 25.00],
+      },
     }),
     modelUsageCounter: counter(`${prefix}model.usage`, {
       unit: "{request}",

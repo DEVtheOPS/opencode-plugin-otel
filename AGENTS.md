@@ -54,6 +54,7 @@ src/
 - **`OPENCODE_ENABLE_TELEMETRY`** — all OTel instrumentation is gated on this env var. The plugin always loads regardless; only telemetry is disabled when unset.
 - **`OPENCODE_METRIC_PREFIX`** — defaults to `opencode.`; set to `claude_code.` for Claude Code dashboard compatibility.
 - **`OPENCODE_COST_USAGE_SCALE`** — positive number (default `1`); multiplier applied **only** to the `cost.usage` counter. Workaround for backends that round metric values to one decimal place server-side (e.g. AppSignal). The `session.cost.total` histogram, spans (`gen_ai.usage.cost`, `cost_usd` attributes), and log events all keep raw USD. Threaded through `HandlerContext.costUsageScale`; when ≠ 1, the `cost.usage` metric unit is reported as `USD/<scale>` and its description is annotated.
+- **Plugin options** — `loadConfig` also accepts an `OtelPluginOptions` object passed via opencode's plugin tuple form (`["opencode-plugin-otel", { ... }]`, threaded through `OtelPlugin`'s second argument). Precedence is option → `OPENCODE_*` env → default. Keep option keys 1:1 with `PluginConfig` field names.
 
 ## Commit message format
 
