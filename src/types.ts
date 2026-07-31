@@ -67,6 +67,15 @@ export type SessionTotals = {
   agentType: SessionAgentType
 }
 
+/** Bounded hierarchy identity for one session. */
+export type SessionMetadata = {
+  sessionID: string
+  parentSessionID?: string
+  parentMessageID?: string
+  rootSessionID?: string
+  agentType: SessionAgentType | "unknown"
+}
+
 /** Pending root-run metadata captured from `chat.message` until the user message ID is known. */
 export type PendingRun = {
   agent: string
@@ -93,6 +102,8 @@ export type HandlerContext = {
   pendingToolSpans: Map<string, PendingToolSpan>
   pendingPermissions: Map<string, PendingPermission>
   sessionTotals: Map<string, SessionTotals>
+  sessionMetadata: Map<string, SessionMetadata>
+  seenSubtasks: Map<string, number>
   sessionDiffTotals: Map<string, { additions: number; deletions: number }>
   disabledMetrics: Set<string>
   disabledTraces: Set<string>

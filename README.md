@@ -50,6 +50,8 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 | `opencode.model.usage` | Counter | Messages per model and provider |
 | `opencode.retry.count` | Counter | API retries observed via `session.status` events |
 
+All session-scoped metrics include `session.id`. Sessions created by subagents also include `root.session.id`, which identifies the top-level session, plus `is_subagent=true`. Costs and tokens remain attributed to their emitting `session.id`; aggregate by `root.session.id` in your metrics backend to include subagent usage in a root-session total.
+
 ### Log events
 
 | Event | Description |

@@ -1,6 +1,6 @@
 import { trace } from "@opentelemetry/api"
 import { MAX_PENDING } from "./types.ts"
-import type { HandlerContext, SessionAgentType } from "./types.ts"
+import type { HandlerContext, SessionAgentType, SessionMetadata } from "./types.ts"
 
 const GEN_AI_PROVIDER_NAMES: Readonly<Record<string, string>> = {
   "amazon-bedrock": "aws.bedrock",
@@ -126,4 +126,41 @@ export function agentAttrs(agentName: string, agentType: SessionAgentType | "unk
     "agent.name": agentName,
     "agent.type": agentType,
   } as const
+}
+
+/**
+ * Builds bounded metric dimensions for a session-scoped agent identity.
+ * Adds the hierarchy `root.session.id` label only when the metadata chain is known,
+ * so subagent spend can be rolled into the root session at query time.
+ */
+export function metricAttrs(
+  sessionID: string,
+  agentName: string,
+  agentType: SessionAgentType | "unknown",
+  ctx: Pick<HandlerContext, "sessionMetadata">,
+) {
+  const rootSessionID = ctx.sessionMetadata.get(sessionID)?.rootSessionID
+  return {
+    "session.id": sessionID,
+    ...(rootSessionID ? { "root.session.id": rootSessionID } : {}),
+    agent: agentName,
+    "agent.type": agentType,
+    is_subagent: agentType === "subagent",
+  } as const
+}
+
+/** Builds hierarchy attributes for logs and spans, including root/parent session and parent message ids. */
+export function sessionAttrs(sessionID: string, ctx: Pick<HandlerContext, "sessionMetadata">) {
+  const meta = ctx.sessionMetadata.get(sessionID)
+  return {
+    "session.id": sessionID,
+    ...(meta?.parentSessionID ? { "parent.session.id": meta.parentSessionID } : {}),
+    ...(meta?.parentMessageID ? { "parent.message.id": meta.parentMessageID } : {}),
+    ...(meta?.rootSessionID ? { "root.session.id": meta.rootSessionID } : {}),
+  }
+}
+
+/** Stores session hierarchy identity, evicting the oldest entry first when the map is at capacity. */
+export function setSessionMetadata(sessionID: string, value: SessionMetadata, ctx: HandlerContext) {
+  setBoundedMap(ctx.sessionMetadata, sessionID, value)
 }

@@ -34,9 +34,11 @@ import {
   setBoundedMap,
   accumulateSessionTotals,
   getSessionAgentMeta,
+  metricAttrs,
   isMetricEnabled,
   isTraceEnabled,
   resolveSessionTraceContext,
+  sessionAttrs,
 } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
 
@@ -44,6 +46,7 @@ const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 const LLM_FINISH_REASON = "llm.finish_reason"
 
 type SubtaskPart = {
+  id?: string
   type: "subtask"
   sessionID: string
   messageID: string
@@ -69,38 +72,39 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
   const duration = assistant.time.completed - assistant.time.created
   const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
   const agent = agentName
+  const metricAgent = metricAttrs(sessionID, agentName, agentType, ctx)
 
   const totalTokens = assistant.tokens.input + assistant.tokens.output + assistant.tokens.reasoning
     + assistant.tokens.cache.read + assistant.tokens.cache.write
 
   if (isMetricEnabled("token.usage", ctx)) {
     const { tokenCounter } = ctx.instruments
-    tokenCounter.add(assistant.tokens.input, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "input" })
-    tokenCounter.add(assistant.tokens.output, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "output" })
-    tokenCounter.add(assistant.tokens.reasoning, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "reasoning" })
-    tokenCounter.add(assistant.tokens.cache.read, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheRead" })
-    tokenCounter.add(assistant.tokens.cache.write, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheCreation" })
+    tokenCounter.add(assistant.tokens.input, { ...ctx.commonAttrs, model: modelID, provider: providerID, ...metricAgent, type: "input" })
+    tokenCounter.add(assistant.tokens.output, { ...ctx.commonAttrs, model: modelID, provider: providerID, ...metricAgent, type: "output" })
+    tokenCounter.add(assistant.tokens.reasoning, { ...ctx.commonAttrs, model: modelID, provider: providerID, ...metricAgent, type: "reasoning" })
+    tokenCounter.add(assistant.tokens.cache.read, { ...ctx.commonAttrs, model: modelID, provider: providerID, ...metricAgent, type: "cacheRead" })
+    tokenCounter.add(assistant.tokens.cache.write, { ...ctx.commonAttrs, model: modelID, provider: providerID, ...metricAgent, type: "cacheCreation" })
   }
 
   if (isMetricEnabled("cost.usage", ctx)) {
-    ctx.instruments.costCounter.add(assistant.cost, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent })
+    ctx.instruments.costCounter.add(assistant.cost, { ...ctx.commonAttrs, model: modelID, provider: providerID, ...metricAgent })
   }
 
   if (isMetricEnabled("cache.count", ctx)) {
     if (assistant.tokens.cache.read > 0) {
-      ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheRead" })
+      ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs, model: modelID, provider: providerID, ...metricAgent, type: "cacheRead" })
     }
     if (assistant.tokens.cache.write > 0) {
-      ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheCreation" })
+      ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs, model: modelID, provider: providerID, ...metricAgent, type: "cacheCreation" })
     }
   }
 
   if (isMetricEnabled("message.count", ctx)) {
-    ctx.instruments.messageCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent })
+    ctx.instruments.messageCounter.add(1, { ...ctx.commonAttrs, model: modelID, provider: providerID, ...metricAgent })
   }
 
   if (isMetricEnabled("model.usage", ctx)) {
-    ctx.instruments.modelUsageCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, provider: providerID, agent })
+    ctx.instruments.modelUsageCounter.add(1, { ...ctx.commonAttrs, model: modelID, provider: providerID, ...metricAgent })
   }
 
   accumulateSessionTotals(sessionID, totalTokens, assistant.cost, ctx)
@@ -168,7 +172,7 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
       body: "api_error",
       attributes: {
         "event.name": "api_error",
-        "session.id": sessionID,
+        ...sessionAttrs(sessionID, ctx),
         model: modelID,
         provider: providerID,
         "gen_ai.provider.name": genAiProviderName(providerID),
@@ -195,7 +199,7 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
     body: "api_request",
     attributes: {
       "event.name": "api_request",
-        "session.id": sessionID,
+        ...sessionAttrs(sessionID, ctx),
         model: modelID,
         provider: providerID,
         "gen_ai.provider.name": genAiProviderName(providerID),
@@ -242,12 +246,17 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
 
   if (part.type === "subtask") {
     const subtask = part as unknown as SubtaskPart
+    const key = subtask.id
+      ? `${subtask.sessionID}:${subtask.id}`
+      : `${subtask.sessionID}:${subtask.messageID}:${subtask.agent}:${subtask.description}:${subtask.prompt}`
+    if (ctx.seenSubtasks.has(key)) return
+    setBoundedMap(ctx.seenSubtasks, key, Date.now())
+    const { agentName, agentType } = getSessionAgentMeta(subtask.sessionID, ctx)
     if (isMetricEnabled("subtask.count", ctx)) {
       ctx.instruments.subtaskCounter.add(1, {
         ...ctx.commonAttrs,
-        "session.id": subtask.sessionID,
-        agent: subtask.agent,
-        "agent.type": "subagent",
+        ...metricAttrs(subtask.sessionID, agentName, agentType, ctx),
+        "subtask.agent": subtask.agent,
       })
     }
     ctx.emitLog({
@@ -258,8 +267,9 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
       body: "subtask_invoked",
       attributes: {
         "event.name": "subtask_invoked",
-        "session.id": subtask.sessionID,
-        ...agentAttrs(subtask.agent, "subagent"),
+        ...sessionAttrs(subtask.sessionID, ctx),
+        "parent.message.id": subtask.messageID,
+        ...agentAttrs(agentName, agentType),
         description: subtask.description,
         prompt_length: subtask.prompt.length,
         ...ctx.commonAttrs,
@@ -447,9 +457,8 @@ export function startMessageSpan(
       kind: SpanKind.CLIENT,
       attributes: {
         [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.LLM,
-        [SESSION_ID]: sessionID,
-        [AGENT_NAME]: agentName,
-        "agent.type": agentType,
+        ...sessionAttrs(sessionID, ctx),
+        ...agentAttrs(agentName, agentType),
         [LLM_SYSTEM]: providerID,
         [LLM_PROVIDER]: providerID,
         "gen_ai.provider.name": genAiProviderName(providerID),

@@ -26,8 +26,7 @@ import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from
 import { handlePermissionUpdated, handlePermissionReplied } from "./handlers/permission.ts"
 import { handleSessionDiff, handleCommandExecuted } from "./handlers/activity.ts"
 import { handleChatHeaders } from "./handlers/chat-headers.ts"
-import { agentAttrs, getSessionAgentMeta, setBoundedMap } from "./util.ts"
-import type { SessionTotals } from "./types.ts"
+import { agentAttrs, getSessionAgentMeta, setBoundedMap, setSessionMetadata } from "./util.ts"
 
 const PLUGIN_VERSION: string = (pkg as { version?: string }).version ?? "unknown"
 
@@ -105,6 +104,8 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
   const pendingToolSpans = new Map()
   const pendingPermissions = new Map()
   const sessionTotals = new Map()
+  const sessionMetadata = new Map()
+  const seenSubtasks = new Map()
   const sessionDiffTotals = new Map()
   const runSpans = new Map()
   const runSpanContexts = new Map()
@@ -150,6 +151,8 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     pendingToolSpans,
     pendingPermissions,
     sessionTotals,
+    sessionMetadata,
+    seenSubtasks,
     sessionDiffTotals,
     disabledMetrics,
     disabledTraces,
@@ -224,16 +227,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     "chat.message": safe("chat.message", async (input, output) => {
       const agent = input.agent ?? "unknown"
       const startTime = Date.now()
-      const existingTotals = sessionTotals.get(input.sessionID)
-      const nextTotals: SessionTotals = {
-        startMs: existingTotals?.startMs ?? startTime,
-        tokens: existingTotals?.tokens ?? 0,
-        cost: existingTotals?.cost ?? 0,
-        messages: existingTotals?.messages ?? 0,
-        agent,
-        agentType: existingTotals?.agentType ?? "primary",
-      }
-      setBoundedMap(sessionTotals, input.sessionID, nextTotals)
+      prepareSessionForMessage(input.sessionID, agent, startTime, ctx)
       const { agentType } = getSessionAgentMeta(input.sessionID, ctx)
       const sessionSpan = sessionSpans.get(input.sessionID)
       if (sessionSpan) sessionSpan.setAttributes({ [AGENT_NAME]: agent, "agent.type": agentType })
@@ -363,4 +357,25 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
       }
     }),
   }
+}
+
+export function prepareSessionForMessage(sessionID: string, agent: string, startTime: number, ctx: HandlerContext) {
+  const existingTotals = ctx.sessionTotals.get(sessionID)
+  const priorMetadata = ctx.sessionMetadata.get(sessionID)
+  const agentType = existingTotals?.agentType ?? priorMetadata?.agentType ?? "primary"
+  setBoundedMap(ctx.sessionTotals, sessionID, {
+    startMs: existingTotals?.startMs ?? startTime,
+    tokens: existingTotals?.tokens ?? 0,
+    cost: existingTotals?.cost ?? 0,
+    messages: existingTotals?.messages ?? 0,
+    agent,
+    agentType,
+  })
+  setSessionMetadata(sessionID, {
+    sessionID,
+    parentSessionID: priorMetadata?.parentSessionID,
+    parentMessageID: priorMetadata?.parentMessageID,
+    rootSessionID: priorMetadata?.rootSessionID ?? sessionID,
+    agentType,
+  }, ctx)
 }
