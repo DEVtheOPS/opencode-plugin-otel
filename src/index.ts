@@ -135,6 +135,13 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     await log("info", "OTLP log events disabled")
   }
 
+  if (config.capturePromptInLogs) {
+    await log(
+      "info",
+      "prompt-in-logs capture enabled - full prompt text emitted in the `prompt` attribute of user_prompt log events (spans always carry the prompt regardless)",
+    )
+  }
+
   const ctx: HandlerContext = {
     log,
     emitLog,
@@ -277,6 +284,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
           "session.id": input.sessionID,
           ...agentAttrs(agent, agentType),
           prompt_length: promptLength,
+          ...(config.capturePromptInLogs ? { prompt: promptText } : {}),
           model: input.model
             ? `${input.model.providerID}/${input.model.modelID}`
             : "unknown",

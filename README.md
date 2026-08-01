@@ -57,7 +57,7 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 | `session.created` | Session started |
 | `session.idle` | Session went idle (includes total tokens, cost, messages) |
 | `session.error` | Session error |
-| `user_prompt` | User sent a message (includes `prompt_length`, `model`, `agent`) |
+| `user_prompt` | User sent a message (includes `prompt_length`, `model`, `agent`; also `prompt` when `OPENCODE_CAPTURE_PROMPT_IN_LOGS` is set) |
 | `api_request` | Completed assistant message (tokens, cost, duration) |
 | `api_error` | Failed assistant message (error summary, duration) |
 | `tool_result` | Tool completed or errored (duration, success, output size) |
@@ -100,6 +100,7 @@ The environment variables (set them in your shell profile — `~/.zshrc`, `~/.ba
 | `OPENCODE_METRIC_PREFIX` | `opencode.` | Prefix for all metric names (e.g. set to `claude_code.` for Claude Code dashboard compatibility) |
 | `OPENCODE_DISABLE_METRICS` | *(unset)* | Comma-separated list of metric name suffixes to disable (e.g. `cache.count,session.duration`) |
 | `OPENCODE_DISABLE_LOGS` | *(unset)* | Set to any non-empty value to suppress all OTLP log events while leaving metrics and traces unchanged |
+| `OPENCODE_CAPTURE_PROMPT_IN_LOGS` | *(unset)* | Set to any non-empty value to include the full prompt text in the `prompt` attribute of `user_prompt` log events. **Log events only** — trace spans always carry the prompt in `input.value` regardless of this flag (disable span-level capture separately via `OPENCODE_DISABLE_TRACES`). **Off by default — prompts may contain secrets or PII; enable only for trusted collectors.** |
 | `OPENCODE_DISABLE_TRACES` | *(unset)* | Comma-separated list of trace types to disable (`session`, `llm`, `tool`). Use `all`, `*`, `true`, or `1` to disable every trace type |
 | `OPENCODE_OTLP_HEADERS` | *(unset)* | Comma-separated `key=value` headers added to all OTLP exports. **Keep out of version control — may contain sensitive auth tokens.** |
 | `OPENCODE_OTLP_HEADERS_HELPER` | *(unset)* | Executable script/binary that returns dynamic OTLP headers as JSON after an auth failure. Helper headers override `OPENCODE_OTLP_HEADERS`. |
@@ -136,6 +137,7 @@ Option keys mirror the resolved config and map to the environment variables:
 |--------|----------------------|
 | `enabled` | `OPENCODE_ENABLE_TELEMETRY` |
 | `logsEnabled` | `OPENCODE_DISABLE_LOGS` (inverted) |
+| `capturePromptInLogs` | `OPENCODE_CAPTURE_PROMPT_IN_LOGS` |
 | `endpoint` | `OPENCODE_OTLP_ENDPOINT` |
 | `protocol` | `OPENCODE_OTLP_PROTOCOL` |
 | `metricsInterval` | `OPENCODE_OTLP_METRICS_INTERVAL` |
