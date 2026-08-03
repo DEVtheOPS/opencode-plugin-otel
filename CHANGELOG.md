@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [1.5.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.4.0...v1.5.0) (2026-08-03)
+
+
+### Features
+
+* add prompt logging release metadata ([#114](https://github.com/DEVtheOPS/opencode-plugin-otel/issues/114)) ([63970d8](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/63970d868acea8615dfb97a497d6b19db2941ccd))
+
+
+### Bug Fixes
+
+* **ci:** skip checks for release pull requests ([#116](https://github.com/DEVtheOPS/opencode-plugin-otel/issues/116)) ([2b2d852](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/2b2d852aa4c56af36a63df31be2b0a564fa9eb9f))
+
 ## [1.4.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.3.1...v1.4.0) (2026-07-23)
 
 
