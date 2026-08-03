@@ -10,6 +10,7 @@ permissions:
 jobs:
   title:
     name: Conventional PR title
+    if: ${{ !startsWith(github.head_ref, 'release-please--branches--') }}
     runs-on: ubuntu-latest
     env:
       PR_TITLE: ${{ github.event.pull_request.title }}
