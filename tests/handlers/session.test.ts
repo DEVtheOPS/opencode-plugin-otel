@@ -357,6 +357,19 @@ describe("session metadata — hierarchy chain", () => {
     expect(costCall.attrs["agent.type"]).toBe("subagent")
   })
 
+  test("defers root attribution until session.created supplies child hierarchy", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_root"), ctx)
+
+    prepareSessionForMessage("ses_child", "plan", 2000, ctx)
+    await handleMessageUpdated(makeAssistantMessageUpdated("ses_child"), ctx)
+    expect(counters.cost.calls.at(0)!.attrs["root.session.id"]).toBeUndefined()
+
+    await handleSessionCreated(makeSessionCreated("ses_child", 3000, "ses_root"), ctx)
+    await handleMessageUpdated(makeAssistantMessageUpdated("ses_child"), ctx)
+    expect(counters.cost.calls.at(1)!.attrs["root.session.id"]).toBe("ses_root")
+  })
+
   test("created child overrides provisional parent and root while preserving parent message", async () => {
     const { ctx } = makeCtx()
     ctx.sessionMetadata.set("ses_parent", {

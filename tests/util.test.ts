@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test"
-import { errorSummary, genAiProviderName, setBoundedMap, isMetricEnabled, isTraceEnabled } from "../src/util.ts"
+import { errorSummary, genAiProviderName, setBoundedMap, isMetricEnabled, isTraceEnabled, setSessionMetadata } from "../src/util.ts"
+import type { SessionMetadata } from "../src/types.ts"
 import { MAX_PENDING } from "../src/types.ts"
 
 describe("errorSummary", () => {
@@ -94,6 +95,26 @@ describe("setBoundedMap", () => {
     expect(map.size).toBe(MAX_PENDING)
     expect(map.get("key-10")).toBe(1000)
     expect(map.has("key-0")).toBe(true)
+  })
+})
+
+describe("setSessionMetadata", () => {
+  test("refreshes updated entries so oldest untouched entry is evicted", () => {
+    const sessionMetadata = new Map<string, SessionMetadata>()
+    const ctx = { sessionMetadata }
+
+    for (let i = 0; i < MAX_PENDING; i++) {
+      const sessionID = `session-${i}`
+      setSessionMetadata(sessionID, { sessionID, agentType: "primary" }, ctx)
+    }
+
+    setSessionMetadata("session-0", { sessionID: "session-0", agentType: "primary" }, ctx)
+    setSessionMetadata("overflow", { sessionID: "overflow", agentType: "primary" }, ctx)
+
+    expect(sessionMetadata.size).toBe(MAX_PENDING)
+    expect(sessionMetadata.has("session-0")).toBe(true)
+    expect(sessionMetadata.has("session-1")).toBe(false)
+    expect(sessionMetadata.has("overflow")).toBe(true)
   })
 })
 

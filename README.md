@@ -50,7 +50,7 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 | `opencode.model.usage` | Counter | Messages per model and provider |
 | `opencode.retry.count` | Counter | API retries observed via `session.status` events |
 
-`session.count`, `token.usage`, `cost.usage`, `cache.count`, `message.count`, `model.usage`, `subtask.count`, `session.duration`, `session.token.total`, and `session.cost.total` include hierarchy attributes. After session metadata exists, root sessions have `root.session.id` equal to `session.id`; subagent metrics use their top-level session ID and include `is_subagent=true`. Cost and token measurements remain attributed to their emitting `session.id`; aggregate `token.usage` and `cost.usage` by `root.session.id` in your metrics backend to include subagent usage in root-session totals.
+`session.count`, `token.usage`, `cost.usage`, `cache.count`, `message.count`, `model.usage`, `subtask.count`, `session.duration`, `session.token.total`, and `session.cost.total` include hierarchy attributes when session metadata is available. Root sessions then have `root.session.id` equal to `session.id`; subagent metrics use their top-level session ID and include `is_subagent=true`. Cost and token measurements remain attributed to their emitting `session.id`; aggregate `token.usage` and `cost.usage` by `root.session.id` in your metrics backend to include subagent usage in root-session totals.
 
 ### Log events
 

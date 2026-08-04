@@ -375,7 +375,7 @@ export function prepareSessionForMessage(sessionID: string, agent: string, start
     sessionID,
     parentSessionID: priorMetadata?.parentSessionID,
     parentMessageID: priorMetadata?.parentMessageID,
-    rootSessionID: priorMetadata?.rootSessionID ?? sessionID,
+    rootSessionID: priorMetadata?.rootSessionID,
     agentType,
   }, ctx)
 }

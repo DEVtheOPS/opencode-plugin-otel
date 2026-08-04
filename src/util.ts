@@ -160,7 +160,12 @@ export function sessionAttrs(sessionID: string, ctx: Pick<HandlerContext, "sessi
   }
 }
 
-/** Stores session hierarchy identity, evicting the oldest entry first when the map is at capacity. */
-export function setSessionMetadata(sessionID: string, value: SessionMetadata, ctx: HandlerContext) {
+/** Stores session hierarchy identity, refreshing updated entries before bounded eviction. */
+export function setSessionMetadata(
+  sessionID: string,
+  value: SessionMetadata,
+  ctx: Pick<HandlerContext, "sessionMetadata">,
+) {
+  ctx.sessionMetadata.delete(sessionID)
   setBoundedMap(ctx.sessionMetadata, sessionID, value)
 }
