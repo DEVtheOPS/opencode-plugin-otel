@@ -113,6 +113,8 @@ The environment variables (set them in your shell profile — `~/.zshrc`, `~/.ba
 | `OPENCODE_TRACESTATE` | *(unset)* | W3C [`tracestate`](https://www.w3.org/TR/trace-context/#tracestate-header) string, parsed alongside `OPENCODE_TRACEPARENT` and attached to the remote parent context. Ignored unless a valid `OPENCODE_TRACEPARENT` is also set. |
 | `OPENCODE_TRACE_PROPAGATION_PROVIDERS` | *(unset)* | Comma-separated opencode provider IDs that receive W3C `traceparent` and `tracestate` headers on LLM requests. Use `*` to explicitly enable every provider. |
 
+Prompt logging remains disabled by default. Enable it only when the configured telemetry destination is trusted to receive potentially sensitive prompt contents.
+
 ### Plugin options (opencode.json)
 
 Every setting can also be passed inline through opencode's plugin **tuple form**, so nothing has to be exported in a shell. Options take precedence over the matching `OPENCODE_*` environment variable, which in turn wins over the built-in default.
