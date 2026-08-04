@@ -472,13 +472,25 @@ describe("handleMessagePartUpdated — subtask parts", () => {
     expect(ctx.seenSubtasks.size).toBe(1)
   })
 
-  test("dedupes id-less subtask updates using stable part fields", async () => {
+  test("dedupes id-less subtask updates using a stable prompt hash", async () => {
     const { ctx, counters } = makeCtx()
     const event = makeSubtaskPartUpdated({ sessionID: "ses_parent", id: undefined })
     delete (event.properties.part as { id?: string }).id
     await handleMessagePartUpdated(event, ctx)
     await handleMessagePartUpdated(event, ctx)
     expect(counters.subtask.calls).toHaveLength(1)
+    expect([...ctx.seenSubtasks.keys()].at(0)).not.toContain("Run the build and fix errors")
+  })
+
+  test("counts distinct id-less subtasks with different prompts", async () => {
+    const { ctx, counters } = makeCtx()
+    const first = makeSubtaskPartUpdated({ id: undefined, prompt: "Run the build" })
+    const second = makeSubtaskPartUpdated({ id: undefined, prompt: "Run the tests" })
+    delete (first.properties.part as { id?: string }).id
+    delete (second.properties.part as { id?: string }).id
+    await handleMessagePartUpdated(first, ctx)
+    await handleMessagePartUpdated(second, ctx)
+    expect(counters.subtask.calls).toHaveLength(2)
   })
 
   test("counts matching part ids from different invoking sessions", async () => {

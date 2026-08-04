@@ -248,7 +248,9 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
     const subtask = part as unknown as SubtaskPart
     const key = subtask.id
       ? `${subtask.sessionID}:${subtask.id}`
-      : `${subtask.sessionID}:${subtask.messageID}:${subtask.agent}:${subtask.description}:${subtask.prompt}`
+      : `${subtask.sessionID}:${subtask.messageID}:${new Bun.CryptoHasher("sha256")
+          .update(`${subtask.agent}\0${subtask.description}\0${subtask.prompt}`)
+          .digest("hex")}`
     if (ctx.seenSubtasks.has(key)) return
     setBoundedMap(ctx.seenSubtasks, key, Date.now())
     const { agentName, agentType } = getSessionAgentMeta(subtask.sessionID, ctx)
