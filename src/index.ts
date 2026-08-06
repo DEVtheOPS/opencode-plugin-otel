@@ -362,7 +362,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
 export function prepareSessionForMessage(sessionID: string, agent: string, startTime: number, ctx: HandlerContext) {
   const existingTotals = ctx.sessionTotals.get(sessionID)
   const priorMetadata = ctx.sessionMetadata.get(sessionID)
-  const agentType = existingTotals?.agentType ?? priorMetadata?.agentType ?? "primary"
+  const agentType = existingTotals?.agentType ?? (priorMetadata?.agentType === "subagent" ? "subagent" : "primary")
   setBoundedMap(ctx.sessionTotals, sessionID, {
     startMs: existingTotals?.startMs ?? startTime,
     tokens: existingTotals?.tokens ?? 0,
