@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [1.5.1](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.5.0...v1.5.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **deps:** move TypeScript to dev dependencies ([#118](https://github.com/DEVtheOPS/opencode-plugin-otel/issues/118)) ([4fcf511](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/4fcf511b19553e9889216e23c90184feb218b86e))
+
 ## [1.5.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.4.0...v1.5.0) (2026-08-03)
 
 
