@@ -39,6 +39,7 @@ export type PendingPermission = {
 export type Instruments = {
   sessionCounter: Counter
   tokenCounter: Counter
+  genaiTokenHistogram: Histogram
   costCounter: Counter
   linesCounter: Counter
   linesTotalGauge: Gauge

@@ -53,7 +53,8 @@ type SubtaskPart = {
 }
 
 /**
- * Handles a completed assistant message: increments token and cost counters, emits
+ * Handles a completed assistant message: increments token and cost counters, records
+ * the `gen_ai.client.token.usage` histogram (OTel GenAI semantic conventions), emits
  * either an `api_request` or `api_error` log event, and ends the LLM span for this message.
  * The `agent` attribute is sourced from the session totals, which are populated by the
  * `chat.message` hook when the user prompt is received.
@@ -80,6 +81,28 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
     tokenCounter.add(assistant.tokens.reasoning, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "reasoning" })
     tokenCounter.add(assistant.tokens.cache.read, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheRead" })
     tokenCounter.add(assistant.tokens.cache.write, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheCreation" })
+  }
+
+  if (isMetricEnabled("gen_ai.client.token.usage", ctx)) {
+    const { genaiTokenHistogram } = ctx.instruments
+    const genaiTokens: Array<[string, number]> = [
+      ["input", assistant.tokens.input],
+      ["output", assistant.tokens.output],
+      ["reasoning", assistant.tokens.reasoning],
+      ["cacheRead", assistant.tokens.cache.read],
+      ["cacheCreation", assistant.tokens.cache.write],
+    ]
+    for (const [type, value] of genaiTokens) {
+      // Zero measurements would distort the distribution (histograms count every record).
+      if (value <= 0) continue
+      genaiTokenHistogram.record(value, {
+        ...ctx.commonAttrs,
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": providerID,
+        "gen_ai.request.model": modelID,
+        "gen_ai.token.type": type,
+      })
+    }
   }
 
   if (isMetricEnabled("cost.usage", ctx)) {

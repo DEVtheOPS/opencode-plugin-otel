@@ -143,6 +143,43 @@ describe("handleMessageUpdated", () => {
     expect(inputCall.attrs["team"]).toBe("platform")
   })
 
+  test("records gen_ai.client.token.usage histogram per token type with GenAI attributes", async () => {
+    const { ctx, histograms } = makeCtx("proj_test", [], [], true, { team: "platform" })
+    await handleMessageUpdated(
+      makeAssistantMessageUpdated({
+        tokens: { input: 100, output: 50, reasoning: 10, cache: { read: 20, write: 5 } },
+      }),
+      ctx,
+    )
+    const types = histograms.genaiToken.calls.map((c) => c.attrs["gen_ai.token.type"])
+    expect(types).toEqual(["input", "output", "reasoning", "cacheRead", "cacheCreation"])
+    const inputCall = histograms.genaiToken.calls.find((c) => c.attrs["gen_ai.token.type"] === "input")!
+    expect(inputCall.value).toBe(100)
+    expect(inputCall.attrs["gen_ai.operation.name"]).toBe("chat")
+    expect(inputCall.attrs["gen_ai.provider.name"]).toBe("anthropic")
+    expect(inputCall.attrs["gen_ai.request.model"]).toBe("claude-3-5-sonnet")
+    expect(inputCall.attrs["team"]).toBe("platform")
+  })
+
+  test("skips zero-valued token types in gen_ai.client.token.usage histogram", async () => {
+    const { ctx, histograms } = makeCtx()
+    await handleMessageUpdated(
+      makeAssistantMessageUpdated({
+        tokens: { input: 100, output: 50, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+      ctx,
+    )
+    const types = histograms.genaiToken.calls.map((c) => c.attrs["gen_ai.token.type"])
+    expect(types).toEqual(["input", "output"])
+  })
+
+  test("does not record gen_ai.client.token.usage when disabled", async () => {
+    const { ctx, histograms, counters } = makeCtx("proj_test", ["gen_ai.client.token.usage"])
+    await handleMessageUpdated(makeAssistantMessageUpdated({}), ctx)
+    expect(histograms.genaiToken.calls).toHaveLength(0)
+    expect(counters.token.calls).not.toHaveLength(0)
+  })
+
   test("increments cost counter", async () => {
     const { ctx, counters } = makeCtx()
     await handleMessageUpdated(makeAssistantMessageUpdated({ cost: 0.05 }), ctx)
