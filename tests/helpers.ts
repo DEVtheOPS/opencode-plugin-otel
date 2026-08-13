@@ -226,6 +226,8 @@ export function makeCtx(
     pendingToolSpans: new Map(),
     pendingPermissions: new Map(),
     sessionTotals: new Map(),
+    sessionMetadata: new Map(),
+    seenSubtasks: new Map(),
     sessionDiffTotals: new Map(),
     disabledMetrics: new Set(disabledMetrics),
     disabledTraces: new Set(disabledTraces),

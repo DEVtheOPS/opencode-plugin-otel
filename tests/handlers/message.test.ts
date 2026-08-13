@@ -4,7 +4,9 @@ import { makeCtx } from "../helpers.ts"
 import type { EventMessageUpdated, EventMessagePartUpdated } from "@opencode-ai/sdk"
 
 function makeSubtaskPartUpdated(overrides: {
+  id?: string
   sessionID?: string
+  messageID?: string
   agent?: string
   description?: string
   prompt?: string
@@ -13,9 +15,10 @@ function makeSubtaskPartUpdated(overrides: {
     type: "message.part.updated",
     properties: {
       part: {
+        id: overrides.id ?? "part_1",
         type: "subtask",
         sessionID: overrides.sessionID ?? "ses_1",
-        messageID: "msg_1",
+        messageID: overrides.messageID ?? "msg_1",
         agent: overrides.agent ?? "build",
         description: overrides.description ?? "Build the project",
         prompt: overrides.prompt ?? "Run the build and fix errors",
@@ -398,18 +401,23 @@ describe("handleMessageUpdated — agent attribute", () => {
 })
 
 describe("handleMessagePartUpdated — subtask parts", () => {
-  test("increments subtask counter with agent and session.id attrs", async () => {
+  test("increments subtask counter with invoking session agent and session.id attrs", async () => {
     const { ctx, counters } = makeCtx()
+    ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "general", agentType: "primary" })
     await handleMessagePartUpdated(makeSubtaskPartUpdated({ sessionID: "ses_1", agent: "build" }), ctx)
     expect(counters.subtask.calls).toHaveLength(1)
     const call = counters.subtask.calls.at(0)!
     expect(call.value).toBe(1)
-    expect(call.attrs["agent"]).toBe("build")
+    expect(call.attrs["agent"]).toBe("general")
+    expect(call.attrs["agent.type"]).toBe("primary")
+    expect(call.attrs["is_subagent"]).toBe(false)
+    expect(call.attrs["subtask.agent"]).toBe("build")
     expect(call.attrs["session.id"]).toBe("ses_1")
   })
 
   test("emits subtask_invoked log record", async () => {
     const { ctx, logger } = makeCtx()
+    ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "general", agentType: "primary" })
     await handleMessagePartUpdated(
       makeSubtaskPartUpdated({ agent: "plan", description: "Plan the feature", prompt: "Create a plan" }),
       ctx,
@@ -417,9 +425,10 @@ describe("handleMessagePartUpdated — subtask parts", () => {
     expect(logger.records).toHaveLength(1)
     const record = logger.records.at(0)!
     expect(record.body).toBe("subtask_invoked")
-    expect(record.attributes?.["agent"]).toBe("plan")
-    expect(record.attributes?.["agent.name"]).toBe("plan")
-    expect(record.attributes?.["agent.type"]).toBe("subagent")
+    expect(record.attributes?.["agent"]).toBe("general")
+    expect(record.attributes?.["agent.name"]).toBe("general")
+    expect(record.attributes?.["agent.type"]).toBe("primary")
+    expect(record.attributes?.["parent.message.id"]).toBe("msg_1")
     expect(record.attributes?.["description"]).toBe("Plan the feature")
     expect(record.attributes?.["prompt_length"]).toBe("Create a plan".length)
   })
@@ -451,5 +460,122 @@ describe("handleMessagePartUpdated — subtask parts", () => {
     await handleMessagePartUpdated(e, ctx)
     expect(counters.subtask.calls).toHaveLength(0)
     expect(histograms.tool.calls).toHaveLength(0)
+  })
+
+  test("dedupes repeated subtask updates by session-scoped part id", async () => {
+    const { ctx, counters } = makeCtx()
+    const e = makeSubtaskPartUpdated({ sessionID: "ses_parent", id: "part_1" })
+    await handleMessagePartUpdated(e, ctx)
+    await handleMessagePartUpdated(e, ctx)
+    await handleMessagePartUpdated(e, ctx)
+    expect(counters.subtask.calls).toHaveLength(1)
+    expect(ctx.seenSubtasks.size).toBe(1)
+  })
+
+  test("dedupes id-less subtask updates using a stable prompt hash", async () => {
+    const { ctx, counters } = makeCtx()
+    const event = makeSubtaskPartUpdated({ sessionID: "ses_parent", id: undefined })
+    delete (event.properties.part as { id?: string }).id
+    await handleMessagePartUpdated(event, ctx)
+    await handleMessagePartUpdated(event, ctx)
+    expect(counters.subtask.calls).toHaveLength(1)
+    expect([...ctx.seenSubtasks.keys()].at(0)).not.toContain("Run the build and fix errors")
+  })
+
+  test("counts distinct id-less subtasks with different prompts", async () => {
+    const { ctx, counters } = makeCtx()
+    const first = makeSubtaskPartUpdated({ id: undefined, prompt: "Run the build" })
+    const second = makeSubtaskPartUpdated({ id: undefined, prompt: "Run the tests" })
+    delete (first.properties.part as { id?: string }).id
+    delete (second.properties.part as { id?: string }).id
+    await handleMessagePartUpdated(first, ctx)
+    await handleMessagePartUpdated(second, ctx)
+    expect(counters.subtask.calls).toHaveLength(2)
+  })
+
+  test("counts matching part ids from different invoking sessions", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleMessagePartUpdated(makeSubtaskPartUpdated({ sessionID: "ses_parent_1", id: "part_1" }), ctx)
+    await handleMessagePartUpdated(makeSubtaskPartUpdated({ sessionID: "ses_parent_2", id: "part_1" }), ctx)
+    expect(counters.subtask.calls).toHaveLength(2)
+  })
+
+  test("counts distinct subtask part ids under one invoking message", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleMessagePartUpdated(makeSubtaskPartUpdated({ sessionID: "ses_parent", messageID: "msg_1", id: "part_1" }), ctx)
+    await handleMessagePartUpdated(makeSubtaskPartUpdated({ sessionID: "ses_parent", messageID: "msg_1", id: "part_2" }), ctx)
+    expect(counters.subtask.calls).toHaveLength(2)
+    expect(ctx.seenSubtasks.size).toBe(2)
+  })
+
+  test("does not infer child metadata from a subtask part", async () => {
+    const { ctx } = makeCtx()
+    ctx.sessionMetadata.set("ses_parent", {
+      sessionID: "ses_parent",
+      rootSessionID: "ses_parent",
+      agentType: "primary",
+    })
+    ctx.sessionTotals.set("ses_parent", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "general", agentType: "primary" })
+    await handleMessagePartUpdated(makeSubtaskPartUpdated({ sessionID: "ses_parent", messageID: "msg_parent" }), ctx)
+    const metadata = ctx.sessionMetadata.get("ses_parent")!
+    expect(metadata.parentMessageID).toBeUndefined()
+    expect(metadata.agentType).toBe("primary")
+  })
+
+  test("uses invoking session root hierarchy and agent metadata", async () => {
+    const { ctx, counters } = makeCtx()
+    ctx.sessionMetadata.set("ses_parent", {
+      sessionID: "ses_parent",
+      parentSessionID: "ses_root",
+      rootSessionID: "ses_root",
+      agentType: "subagent",
+    })
+    ctx.sessionTotals.set("ses_parent", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "general", agentType: "subagent" })
+    await handleMessagePartUpdated(makeSubtaskPartUpdated({ sessionID: "ses_parent", agent: "plan" }), ctx)
+    const call = counters.subtask.calls.at(0)!
+    expect(call.attrs["root.session.id"]).toBe("ses_root")
+    expect(call.attrs["agent.type"]).toBe("subagent")
+    expect(call.attrs["subtask.agent"]).toBe("plan")
+  })
+})
+
+describe("handleMessageUpdated — subagent cost attribution", () => {
+  test("token counter carries root.session.id and is_subagent for subagent messages", async () => {
+    const { ctx, counters } = makeCtx()
+    ctx.sessionTotals.set("ses_sub", {
+      startMs: 0,
+      tokens: 0,
+      cost: 0,
+      messages: 0,
+      agent: "plan",
+      agentType: "subagent",
+    })
+    ctx.sessionMetadata.set("ses_sub", {
+      sessionID: "ses_sub",
+      parentSessionID: "ses_root",
+      rootSessionID: "ses_root",
+      agentType: "subagent",
+    })
+    await handleMessageUpdated(makeAssistantMessageUpdated({ sessionID: "ses_sub" }), ctx)
+    const call = counters.token.calls.at(0)!
+    expect(call.attrs["session.id"]).toBe("ses_sub")
+    expect(call.attrs["root.session.id"]).toBe("ses_root")
+    expect(call.attrs["is_subagent"]).toBe(true)
+    expect(call.attrs["agent.type"]).toBe("subagent")
+    expect(call.attrs["provider"]).toBe("anthropic")
+  })
+
+  test("cost counter omits root.session.id before metadata exists", async () => {
+    const { ctx, counters } = makeCtx()
+    ctx.sessionTotals.set("ses_1", {
+      startMs: 0,
+      tokens: 0,
+      cost: 0,
+      messages: 0,
+      agent: "build",
+      agentType: "primary",
+    })
+    await handleMessageUpdated(makeAssistantMessageUpdated({ sessionID: "ses_1" }), ctx)
+    expect(counters.cost.calls.at(0)!.attrs["root.session.id"]).toBeUndefined()
   })
 })

@@ -1,7 +1,9 @@
 import { describe, test, expect } from "bun:test"
-import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus } from "../../src/handlers/session.ts"
+import { prepareSessionForMessage } from "../../src/index.ts"
+import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus, handleRunStarted } from "../../src/handlers/session.ts"
+import { handleMessageUpdated } from "../../src/handlers/message.ts"
 import { makeCtx, makeTracer } from "../helpers.ts"
-import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
+import type { EventMessageUpdated, EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
 import type { Span } from "@opentelemetry/api"
 
 function makeSessionCreated(sessionID: string, createdAt = 1000, parentID?: string): EventSessionCreated {
@@ -32,6 +34,25 @@ function makeSessionError(sessionID: string, error?: { name: string }): EventSes
 
 function makeSessionStatus(sessionID: string, status: { type: "retry"; attempt: number; message: string; next: number } | { type: "busy" } | { type: "idle" }): EventSessionStatus {
   return { type: "session.status", properties: { sessionID, status } } as unknown as EventSessionStatus
+}
+
+function makeAssistantMessageUpdated(sessionID: string): EventMessageUpdated {
+  return {
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_1",
+        role: "assistant",
+        sessionID,
+        parentID: "msg_parent",
+        modelID: "claude",
+        providerID: "anthropic",
+        cost: 0.01,
+        tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 1000, completed: 2000 },
+      },
+    },
+  } as unknown as EventMessageUpdated
 }
 
 describe("handleSessionCreated", () => {
@@ -259,5 +280,132 @@ describe("handleSessionStatus", () => {
     const { ctx, counters } = makeCtx()
     handleSessionStatus(makeSessionStatus("ses_1", { type: "idle" }), ctx)
     expect(counters.retry.calls).toHaveLength(0)
+  })
+})
+
+describe("handleRunStarted — agentType derivation", () => {
+  test("defaults to primary when no session metadata", () => {
+    const { ctx, tracer } = makeCtx()
+    handleRunStarted("run_1", "ses_1", "build", "prompt", "model", 1000, ctx)
+    const span = tracer.spans.find((s) => s.name === "opencode.session")!
+    expect(span.attributes["agent.type"]).toBe("primary")
+    expect(span.attributes["session.is_subagent"]).toBe(false)
+  })
+
+  test("derives subagent from session metadata", () => {
+    const { ctx, tracer } = makeCtx()
+    ctx.sessionMetadata.set("ses_2", {
+      sessionID: "ses_2",
+      parentSessionID: "ses_1",
+      rootSessionID: "ses_1",
+      agentType: "subagent",
+    })
+    handleRunStarted("run_2", "ses_2", "plan", "prompt", "model", 1000, ctx)
+    const span = tracer.spans.find((s) => s.name === "opencode.session")!
+    expect(span.attributes["agent.type"]).toBe("subagent")
+    expect(span.attributes["session.is_subagent"]).toBe(true)
+    expect(span.attributes["parent.session.id"]).toBe("ses_1")
+    expect(span.attributes["root.session.id"]).toBe("ses_1")
+  })
+})
+
+describe("session metadata — hierarchy chain", () => {
+  test("subagent session counter carries root.session.id from parent chain", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    await handleSessionCreated(makeSessionCreated("ses_2", 2000, "ses_1"), ctx)
+    await handleSessionCreated(makeSessionCreated("ses_3", 3000, "ses_2"), ctx)
+    expect(counters.session.calls.at(0)!.attrs["root.session.id"]).toBe("ses_1")
+    expect(counters.session.calls.at(1)!.attrs["root.session.id"]).toBe("ses_1")
+    expect(counters.session.calls.at(2)!.attrs["root.session.id"]).toBe("ses_1")
+    expect(counters.session.calls.at(2)!.attrs["is_subagent"]).toBe(true)
+  })
+
+  test("metadata survives idle so later child metrics retain root attribution", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_root"), ctx)
+    handleSessionIdle(makeSessionIdle("ses_root"), ctx)
+    await handleSessionCreated(makeSessionCreated("ses_child", 2000, "ses_root"), ctx)
+    await handleMessageUpdated(makeAssistantMessageUpdated("ses_child"), ctx)
+    expect(ctx.sessionMetadata.get("ses_child")?.rootSessionID).toBe("ses_root")
+    expect(counters.cost.calls.at(0)!.attrs["root.session.id"]).toBe("ses_root")
+  })
+
+  test("metadata survives error so later child cost keeps root attribution", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_root"), ctx)
+    handleSessionError(makeSessionError("ses_root"), ctx)
+    await handleSessionCreated(makeSessionCreated("ses_child", 2000, "ses_root"), ctx)
+    await handleMessageUpdated(makeAssistantMessageUpdated("ses_child"), ctx)
+    expect(counters.cost.calls.at(0)!.attrs["root.session.id"]).toBe("ses_root")
+  })
+
+  test("chat message rebuild preserves resumed child root and subagent attribution", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_root"), ctx)
+    await handleSessionCreated(makeSessionCreated("ses_child", 2000, "ses_root"), ctx)
+    handleSessionIdle(makeSessionIdle("ses_child"), ctx)
+    prepareSessionForMessage("ses_child", "plan", 3000, ctx)
+    await handleMessageUpdated(makeAssistantMessageUpdated("ses_child"), ctx)
+    const tokenCall = counters.token.calls.at(0)!
+    const costCall = counters.cost.calls.at(0)!
+    expect(tokenCall.attrs["root.session.id"]).toBe("ses_root")
+    expect(tokenCall.attrs["is_subagent"]).toBe(true)
+    expect(tokenCall.attrs["agent.type"]).toBe("subagent")
+    expect(costCall.attrs["root.session.id"]).toBe("ses_root")
+    expect(costCall.attrs["is_subagent"]).toBe(true)
+    expect(costCall.attrs["agent.type"]).toBe("subagent")
+  })
+
+  test("defers root attribution until session.created supplies child hierarchy", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_root"), ctx)
+
+    prepareSessionForMessage("ses_child", "plan", 2000, ctx)
+    await handleMessageUpdated(makeAssistantMessageUpdated("ses_child"), ctx)
+    expect(counters.cost.calls.at(0)!.attrs["root.session.id"]).toBeUndefined()
+
+    await handleSessionCreated(makeSessionCreated("ses_child", 3000, "ses_root"), ctx)
+    await handleMessageUpdated(makeAssistantMessageUpdated("ses_child"), ctx)
+    expect(counters.cost.calls.at(1)!.attrs["root.session.id"]).toBe("ses_root")
+  })
+
+  test("created child overrides provisional parent and root while preserving parent message", async () => {
+    const { ctx } = makeCtx()
+    ctx.sessionMetadata.set("ses_parent", {
+      sessionID: "ses_parent",
+      rootSessionID: "ses_root",
+      agentType: "subagent",
+    })
+    ctx.sessionMetadata.set("ses_child", {
+      sessionID: "ses_child",
+      parentSessionID: "ses_stale",
+      parentMessageID: "msg_parent",
+      rootSessionID: "ses_child",
+      agentType: "primary",
+    })
+    await handleSessionCreated(makeSessionCreated("ses_child", 2000, "ses_parent"), ctx)
+    const metadata = ctx.sessionMetadata.get("ses_child")!
+    expect(metadata.parentSessionID).toBe("ses_parent")
+    expect(metadata.parentMessageID).toBe("msg_parent")
+    expect(metadata.rootSessionID).toBe("ses_root")
+    expect(metadata.agentType).toBe("subagent")
+  })
+
+  test("created root overrides stale provisional hierarchy while preserving parent message", async () => {
+    const { ctx } = makeCtx()
+    ctx.sessionMetadata.set("ses_root", {
+      sessionID: "ses_root",
+      parentSessionID: "ses_stale",
+      parentMessageID: "msg_parent",
+      rootSessionID: "ses_stale",
+      agentType: "subagent",
+    })
+    await handleSessionCreated(makeSessionCreated("ses_root"), ctx)
+    const metadata = ctx.sessionMetadata.get("ses_root")!
+    expect(metadata.parentSessionID).toBeUndefined()
+    expect(metadata.parentMessageID).toBe("msg_parent")
+    expect(metadata.rootSessionID).toBe("ses_root")
+    expect(metadata.agentType).toBe("primary")
   })
 })

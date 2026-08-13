@@ -9,16 +9,18 @@ import {
   MimeType,
   OpenInferenceSpanKind,
   SemanticConventions,
-  SESSION_ID,
 } from "@arizeai/openinference-semantic-conventions"
 import {
   agentAttrs,
   errorSummary,
   getSessionAgentMeta,
+  metricAttrs,
   setBoundedMap,
   isMetricEnabled,
   isTraceEnabled,
   resolveSessionTraceContext,
+  sessionAttrs,
+  setSessionMetadata,
 } from "../util.ts"
 import type { HandlerContext, SessionAgentType } from "../types.ts"
 
@@ -60,10 +62,9 @@ export function handleRunStarted(
       startTime,
       attributes: {
         [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.AGENT,
-        [SESSION_ID]: sessionID,
-        [AGENT_NAME]: agent,
-        "agent.type": "primary",
-        "session.is_subagent": false,
+        ...sessionAttrs(sessionID, ctx),
+        ...agentAttrs(agent, ctx.sessionMetadata.get(sessionID)?.agentType ?? "primary"),
+        "session.is_subagent": ctx.sessionMetadata.get(sessionID)?.agentType === "subagent",
         ...(promptText
           ? {
               [INPUT_VALUE]: promptText,
@@ -87,8 +88,22 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
   const createdAt = time.created
   const isSubagent = !!parentID
   const agentType: SessionAgentType = isSubagent ? "subagent" : "primary"
+  const prior = ctx.sessionMetadata.get(sessionID)
+  setSessionMetadata(sessionID, {
+    sessionID,
+    parentSessionID: parentID,
+    parentMessageID: prior?.parentMessageID,
+    rootSessionID: parentID ? (ctx.sessionMetadata.get(parentID)?.rootSessionID ?? parentID) : sessionID,
+    agentType,
+  }, ctx)
   if (isMetricEnabled("session.count", ctx)) {
-    ctx.instruments.sessionCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, is_subagent: isSubagent })
+    const rootSessionID = ctx.sessionMetadata.get(sessionID)?.rootSessionID
+    ctx.instruments.sessionCounter.add(1, {
+      ...ctx.commonAttrs,
+      "session.id": sessionID,
+      ...(rootSessionID ? { "root.session.id": rootSessionID } : {}),
+      is_subagent: isSubagent,
+    })
   }
   setBoundedMap(ctx.sessionTotals, sessionID, { startMs: createdAt, tokens: 0, cost: 0, messages: 0, agent: "unknown", agentType })
 
@@ -99,10 +114,9 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
         startTime: createdAt,
         attributes: {
           [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.AGENT,
-          [SESSION_ID]: sessionID,
-          [AGENT_NAME]: "unknown",
-          "agent.type": agentType,
+          ...agentAttrs("unknown", agentType),
           "session.is_subagent": isSubagent,
+          ...sessionAttrs(sessionID, ctx),
           ...ctx.commonAttrs,
         },
       },
@@ -120,7 +134,7 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
     body: "session.created",
     attributes: {
       "event.name": "session.created",
-      "session.id": sessionID,
+      ...sessionAttrs(sessionID, ctx),
       is_subagent: isSubagent,
       ...agentAttrs("unknown", agentType),
       ...ctx.commonAttrs,
@@ -162,11 +176,13 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
   const sessionID = e.properties.sessionID
   const totals = ctx.sessionTotals.get(sessionID)
   const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
+  const hierarchyAttrs = sessionAttrs(sessionID, ctx)
+  const metricAgent = metricAttrs(sessionID, agentName, agentType, ctx)
   ctx.sessionTotals.delete(sessionID)
   ctx.sessionDiffTotals.delete(sessionID)
   sweepSession(sessionID, ctx)
 
-  const attrs = { ...ctx.commonAttrs, "session.id": sessionID }
+  const attrs = { ...ctx.commonAttrs, ...metricAgent }
   let duration_ms: number | undefined
 
   if (totals) {
@@ -223,7 +239,7 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
     body: "session.idle",
     attributes: {
       "event.name": "session.idle",
-      "session.id": sessionID,
+      ...hierarchyAttrs,
       total_tokens: totals?.tokens ?? 0,
       total_cost_usd: totals?.cost ?? 0,
       total_messages: totals?.messages ?? 0,
@@ -244,6 +260,7 @@ export function handleSessionError(e: EventSessionError, ctx: HandlerContext) {
   const error = errorSummary(e.properties.error)
   const { agentName, agentType } = rawID ? getSessionAgentMeta(rawID, ctx) : { agentName: "unknown", agentType: "unknown" as const }
   const totals = rawID ? ctx.sessionTotals.get(rawID) : undefined
+  const hierarchyAttrs = sessionAttrs(sessionID, ctx)
   if (rawID) {
     ctx.sessionTotals.delete(rawID)
     ctx.sessionDiffTotals.delete(rawID)
@@ -279,7 +296,7 @@ export function handleSessionError(e: EventSessionError, ctx: HandlerContext) {
     body: "session.error",
     attributes: {
       "event.name": "session.error",
-      "session.id": sessionID,
+      ...hierarchyAttrs,
       error,
       ...agentAttrs(agentName, agentType),
       ...ctx.commonAttrs,
