@@ -1,6 +1,6 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { SpanStatusCode } from "@opentelemetry/api"
-import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
+import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus, EventSessionUpdated } from "@opencode-ai/sdk"
 import {
   AGENT_NAME,
   INPUT_MIME_TYPE,
@@ -24,6 +24,8 @@ import type { HandlerContext, SessionAgentType } from "../types.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 
+const SESSION_TITLE = "session.title"
+
 /** Starts or refreshes the root run span for a single user turn, keyed by the user message ID. */
 export function handleRunStarted(
   runID: string,
@@ -38,10 +40,12 @@ export function handleRunStarted(
   ctx.pendingRuns.delete(sessionID)
   if (promptText) setBoundedMap(ctx.runInputs, runID, promptText)
   if (!isTraceEnabled("session", ctx)) return
+  const title = ctx.sessionTitles.get(sessionID)
   const existing = ctx.runSpans.get(runID)
   if (existing) {
     existing.setAttributes({
       [AGENT_NAME]: agent,
+      ...(title ? { [SESSION_TITLE]: title } : {}),
       ...(promptText
         ? {
             [INPUT_VALUE]: promptText,
@@ -64,6 +68,7 @@ export function handleRunStarted(
         [AGENT_NAME]: agent,
         "agent.type": "primary",
         "session.is_subagent": false,
+        ...(title ? { [SESSION_TITLE]: title } : {}),
         ...(promptText
           ? {
               [INPUT_VALUE]: promptText,
@@ -81,9 +86,21 @@ export function handleRunStarted(
   setBoundedMap(ctx.runSpanContexts, runID, runSpan.spanContext())
 }
 
+/** Records opencode's session title, which arrives after `session.created`, and stamps it on the session and run spans still open. */
+export function handleSessionUpdated(e: EventSessionUpdated, ctx: HandlerContext) {
+  const { id: sessionID, title } = e.properties.info
+  if (!title || ctx.sessionTitles.get(sessionID) === title) return
+  setBoundedMap(ctx.sessionTitles, sessionID, title)
+  if (!isTraceEnabled("session", ctx)) return
+  ctx.sessionSpans.get(sessionID)?.setAttribute(SESSION_TITLE, title)
+  const runID = ctx.activeRuns.get(sessionID)
+  if (runID) ctx.runSpans.get(runID)?.setAttribute(SESSION_TITLE, title)
+}
+
 /** Increments the session counter, records start time, starts the root session span, and emits a `session.created` log event. */
 export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext) {
-  const { id: sessionID, time, parentID } = e.properties.info
+  const { id: sessionID, time, parentID, title } = e.properties.info
+  if (title) setBoundedMap(ctx.sessionTitles, sessionID, title)
   const createdAt = time.created
   const isSubagent = !!parentID
   const agentType: SessionAgentType = isSubagent ? "subagent" : "primary"
@@ -103,6 +120,7 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
           [AGENT_NAME]: "unknown",
           "agent.type": agentType,
           "session.is_subagent": isSubagent,
+          ...(title ? { [SESSION_TITLE]: title } : {}),
           ...ctx.commonAttrs,
         },
       },
@@ -141,6 +159,7 @@ function sweepSession(sessionID: string, ctx: HandlerContext) {
     }
   }
   ctx.pendingRuns.delete(sessionID)
+  ctx.sessionTitles.delete(sessionID)
   const msgPrefix = `${sessionID}:`
   for (const [key, span] of ctx.messageSpans) {
     if (key.startsWith(msgPrefix)) {

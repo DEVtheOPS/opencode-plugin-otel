@@ -6,6 +6,7 @@ import { AGENT_NAME } from "@arizeai/openinference-semantic-conventions"
 import pkg from "../package.json" with { type: "json" }
 import type {
   EventSessionCreated,
+  EventSessionUpdated,
   EventSessionIdle,
   EventSessionError,
   EventSessionStatus,
@@ -21,7 +22,7 @@ import { loadConfig, parseAttributePairs, resolveHelperPath, resolveLogLevel, ty
 import { probeEndpoint } from "./probe.ts"
 import { setupOtel, createInstruments, forceFlushOtel } from "./otel.ts"
 import { remoteParentContext } from "./trace-context.ts"
-import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus, handleRunStarted } from "./handlers/session.ts"
+import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus, handleSessionUpdated, handleRunStarted } from "./handlers/session.ts"
 import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "./handlers/message.ts"
 import { handlePermissionUpdated, handlePermissionReplied } from "./handlers/permission.ts"
 import { handleSessionDiff, handleCommandExecuted } from "./handlers/activity.ts"
@@ -112,6 +113,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
   const assistantRuns = new Map()
   const pendingRuns = new Map()
   const runInputs = new Map()
+  const sessionTitles = new Map()
   const sessionSpans = new Map()
   const sessionSpanContexts = new Map()
   const messageSpans = new Map()
@@ -162,6 +164,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     assistantRuns,
     pendingRuns,
     runInputs,
+    sessionTitles,
     sessionSpans,
     sessionSpanContexts,
     messageSpans,
@@ -295,6 +298,9 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
 
     event: safe("event", async ({ event }) => {
       switch (event.type) {
+        case "session.updated":
+          handleSessionUpdated(event as EventSessionUpdated, ctx)
+          break
         case "session.created":
           await handleSessionCreated(event as EventSessionCreated, ctx)
           break

@@ -1,10 +1,10 @@
 import { describe, test, expect } from "bun:test"
-import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus } from "../../src/handlers/session.ts"
+import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus, handleSessionUpdated, handleRunStarted } from "../../src/handlers/session.ts"
 import { makeCtx, makeTracer } from "../helpers.ts"
-import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
+import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus, EventSessionUpdated } from "@opencode-ai/sdk"
 import type { Span } from "@opentelemetry/api"
 
-function makeSessionCreated(sessionID: string, createdAt = 1000, parentID?: string): EventSessionCreated {
+function makeSessionCreated(sessionID: string, createdAt = 1000, parentID?: string, title?: string): EventSessionCreated {
   return {
     type: "session.created",
     properties: {
@@ -13,10 +13,26 @@ function makeSessionCreated(sessionID: string, createdAt = 1000, parentID?: stri
         projectID: "proj_test",
         directory: "/tmp",
         parentID,
+        title,
         time: { created: createdAt },
       },
     },
   } as unknown as EventSessionCreated
+}
+
+function makeSessionUpdated(sessionID: string, title: string): EventSessionUpdated {
+  return {
+    type: "session.updated",
+    properties: {
+      info: {
+        id: sessionID,
+        projectID: "proj_test",
+        directory: "/tmp",
+        title,
+        time: { created: 1000, updated: 2000 },
+      },
+    },
+  } as unknown as EventSessionUpdated
 }
 
 function makeSessionIdle(sessionID: string): EventSessionIdle {
@@ -259,5 +275,68 @@ describe("handleSessionStatus", () => {
     const { ctx, counters } = makeCtx()
     handleSessionStatus(makeSessionStatus("ses_1", { type: "idle" }), ctx)
     expect(counters.retry.calls).toHaveLength(0)
+  })
+})
+
+describe("handleSessionCreated — session title", () => {
+  test("remembers the title opencode already has at creation", async () => {
+    const { ctx } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1", 1000, undefined, "Fix the flaky test"), ctx)
+    expect(ctx.sessionTitles.get("ses_1")).toBe("Fix the flaky test")
+  })
+
+  test("puts the title on a subagent session span", async () => {
+    const { ctx, tracer } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_child", 1000, "ses_parent", "Fix the flaky test"), ctx)
+    expect(tracer.spans.at(0)!.attributes["session.title"]).toBe("Fix the flaky test")
+  })
+
+})
+
+describe("handleSessionUpdated", () => {
+  test("stamps a later title on the open session span", async () => {
+    const { ctx, tracer } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_child", 1000, "ses_parent"), ctx)
+    handleSessionUpdated(makeSessionUpdated("ses_child", "Fix the flaky test"), ctx)
+    expect(tracer.spans.at(0)!.attributes["session.title"]).toBe("Fix the flaky test")
+  })
+
+  test("stamps a later title on the open run span", async () => {
+    const { ctx, tracer } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleRunStarted("user_1", "ses_1", "build", "prompt", "anthropic/claude", 1000, ctx)
+    handleSessionUpdated(makeSessionUpdated("ses_1", "Fix the flaky test"), ctx)
+    const runSpan = tracer.spans.find((s) => s.attributes["session.id"] === "ses_1")!
+    expect(runSpan.attributes["session.title"]).toBe("Fix the flaky test")
+  })
+
+  test("puts a known title on a run span started afterwards", async () => {
+    const { ctx, tracer } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleSessionUpdated(makeSessionUpdated("ses_1", "Fix the flaky test"), ctx)
+    handleRunStarted("user_1", "ses_1", "build", "prompt", "anthropic/claude", 1000, ctx)
+    expect(tracer.spans.at(-1)!.attributes["session.title"]).toBe("Fix the flaky test")
+  })
+
+  test("ignores an empty title and keeps the one it has", async () => {
+    const { ctx } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1", 1000, undefined, "Fix the flaky test"), ctx)
+    handleSessionUpdated(makeSessionUpdated("ses_1", ""), ctx)
+    expect(ctx.sessionTitles.get("ses_1")).toBe("Fix the flaky test")
+  })
+
+  test("forgets the title when the session goes idle", async () => {
+    const { ctx } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1", 1000, undefined, "Fix the flaky test"), ctx)
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    expect(ctx.sessionTitles.has("ses_1")).toBe(false)
+  })
+
+  test("skips span work when session traces are disabled", async () => {
+    const { ctx, tracer } = makeCtx("proj_test", [], ["session"])
+    await handleSessionCreated(makeSessionCreated("ses_child", 1000, "ses_parent"), ctx)
+    handleSessionUpdated(makeSessionUpdated("ses_child", "Fix the flaky test"), ctx)
+    expect(tracer.spans).toHaveLength(0)
+    expect(ctx.sessionTitles.get("ses_child")).toBe("Fix the flaky test")
   })
 })

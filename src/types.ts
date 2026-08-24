@@ -105,6 +105,7 @@ export type HandlerContext = {
   assistantRuns: Map<string, string>
   pendingRuns: Map<string, PendingRun>
   runInputs: Map<string, string>
+  sessionTitles: Map<string, string>
   sessionSpans: Map<string, Span>
   sessionSpanContexts: Map<string, SpanContext>
   messageSpans: Map<string, Span>
