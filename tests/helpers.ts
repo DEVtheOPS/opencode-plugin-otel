@@ -238,6 +238,7 @@ export function makeCtx(
     assistantRuns: new Map(),
     pendingRuns: new Map(),
     runInputs: new Map(),
+    sessionTitles: new Map(),
     sessionSpans: new Map(),
     sessionSpanContexts: new Map(),
     messageSpans: new Map(),
