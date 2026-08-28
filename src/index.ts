@@ -26,7 +26,7 @@ import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from
 import { handlePermissionUpdated, handlePermissionReplied } from "./handlers/permission.ts"
 import { handleSessionDiff, handleCommandExecuted } from "./handlers/activity.ts"
 import { handleChatHeaders } from "./handlers/chat-headers.ts"
-import { agentAttrs, getSessionAgentMeta, setBoundedMap } from "./util.ts"
+import { agentAttrs, getSessionAgentMeta, resolveSessionTraceContext, setBoundedMap } from "./util.ts"
 import type { SessionTotals } from "./types.ts"
 
 const PLUGIN_VERSION: string = (pkg as { version?: string }).version ?? "unknown"
@@ -290,6 +290,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
             : "unknown",
           ...commonAttrs,
         },
+        context: resolveSessionTraceContext(input.sessionID, ctx),
       })
     }),
 
