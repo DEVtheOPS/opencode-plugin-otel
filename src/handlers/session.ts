@@ -125,6 +125,7 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
       ...agentAttrs("unknown", agentType),
       ...ctx.commonAttrs,
     },
+    context: resolveSessionTraceContext(sessionID, ctx),
   })
   return ctx.log("info", "otel: session.created", { sessionID, createdAt, isSubagent })
 }
@@ -230,6 +231,7 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
       ...agentAttrs(agentName, agentType),
       ...ctx.commonAttrs,
     },
+    context: resolveSessionTraceContext(sessionID, ctx),
   })
   ctx.log("debug", "otel: session.idle", {
     sessionID,
@@ -284,6 +286,7 @@ export function handleSessionError(e: EventSessionError, ctx: HandlerContext) {
       ...agentAttrs(agentName, agentType),
       ...ctx.commonAttrs,
     },
+    context: resolveSessionTraceContext(sessionID, ctx),
   })
   ctx.log("error", "otel: session.error", { sessionID, error })
 }

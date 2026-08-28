@@ -1,6 +1,6 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import type { EventSessionDiff, EventCommandExecuted } from "@opencode-ai/sdk"
-import { agentAttrs, getSessionAgentMeta, isMetricEnabled, setBoundedMap } from "../util.ts"
+import { agentAttrs, getSessionAgentMeta, isMetricEnabled, resolveSessionTraceContext, setBoundedMap } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
 
 /**
@@ -83,5 +83,6 @@ export function handleCommandExecuted(e: EventCommandExecuted, ctx: HandlerConte
       ...agentAttrs(agentName, agentType),
       ...ctx.commonAttrs,
     },
+    context: resolveSessionTraceContext(e.properties.sessionID, ctx),
   })
 }

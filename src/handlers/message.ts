@@ -177,6 +177,7 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
         duration_ms: duration,
         ...ctx.commonAttrs,
       },
+      context: resolveSessionTraceContext(sessionID, ctx, { runID: assistant.parentID, assistantMessageID: assistant.id }),
     })
     return ctx.log("error", "otel: api_error", {
       sessionID,
@@ -209,6 +210,7 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
       cache_creation_tokens: assistant.tokens.cache.write,
       ...ctx.commonAttrs,
     },
+    context: resolveSessionTraceContext(sessionID, ctx, { runID: assistant.parentID, assistantMessageID: assistant.id }),
   })
   return ctx.log("info", "otel: api_request", {
     sessionID,
@@ -264,6 +266,7 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
         prompt_length: subtask.prompt.length,
         ...ctx.commonAttrs,
       },
+      context: resolveSessionTraceContext(subtask.sessionID, ctx),
     })
     return ctx.log("info", "otel: subtask_invoked", {
       sessionID: subtask.sessionID,
@@ -399,6 +402,7 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
         ...sizeAttr,
         ...ctx.commonAttrs,
       },
+      context: resolveSessionTraceContext(toolPart.sessionID, ctx, { assistantMessageID: toolPart.messageID }),
     })
     ctx.log("debug", "otel: tool.duration histogram recorded", {
       sessionID: toolPart.sessionID,

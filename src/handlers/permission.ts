@@ -1,6 +1,6 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import type { EventPermissionUpdated, EventPermissionReplied } from "@opencode-ai/sdk"
-import { agentAttrs, getSessionAgentMeta, setBoundedMap } from "../util.ts"
+import { agentAttrs, getSessionAgentMeta, resolveSessionTraceContext, setBoundedMap } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
 
 /** Stores a pending permission prompt in the context map for later correlation with its reply. */
@@ -38,5 +38,6 @@ export function handlePermissionReplied(e: EventPermissionReplied, ctx: HandlerC
       ...agentAttrs(agentName, agentType),
       ...ctx.commonAttrs,
     },
+    context: resolveSessionTraceContext(sessionID, ctx),
   })
 }
