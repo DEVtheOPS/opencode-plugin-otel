@@ -75,32 +75,32 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
 
   if (isMetricEnabled("token.usage", ctx)) {
     const { tokenCounter } = ctx.instruments
-    tokenCounter.add(assistant.tokens.input, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "input" })
-    tokenCounter.add(assistant.tokens.output, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "output" })
-    tokenCounter.add(assistant.tokens.reasoning, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "reasoning" })
-    tokenCounter.add(assistant.tokens.cache.read, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheRead" })
-    tokenCounter.add(assistant.tokens.cache.write, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheCreation" })
+    tokenCounter.add(assistant.tokens.input, { ...ctx.commonAttrs,model: modelID, agent, type: "input" })
+    tokenCounter.add(assistant.tokens.output, { ...ctx.commonAttrs,model: modelID, agent, type: "output" })
+    tokenCounter.add(assistant.tokens.reasoning, { ...ctx.commonAttrs,model: modelID, agent, type: "reasoning" })
+    tokenCounter.add(assistant.tokens.cache.read, { ...ctx.commonAttrs,model: modelID, agent, type: "cacheRead" })
+    tokenCounter.add(assistant.tokens.cache.write, { ...ctx.commonAttrs,model: modelID, agent, type: "cacheCreation" })
   }
 
   if (isMetricEnabled("cost.usage", ctx)) {
-    ctx.instruments.costCounter.add(assistant.cost, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent })
+    ctx.instruments.costCounter.add(assistant.cost, { ...ctx.commonAttrs,model: modelID, agent })
   }
 
   if (isMetricEnabled("cache.count", ctx)) {
     if (assistant.tokens.cache.read > 0) {
-      ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheRead" })
+      ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs,model: modelID, agent, type: "cacheRead" })
     }
     if (assistant.tokens.cache.write > 0) {
-      ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent, type: "cacheCreation" })
+      ctx.instruments.cacheCounter.add(1, { ...ctx.commonAttrs,model: modelID, agent, type: "cacheCreation" })
     }
   }
 
   if (isMetricEnabled("message.count", ctx)) {
-    ctx.instruments.messageCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent })
+    ctx.instruments.messageCounter.add(1, { ...ctx.commonAttrs,model: modelID, agent })
   }
 
   if (isMetricEnabled("model.usage", ctx)) {
-    ctx.instruments.modelUsageCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, provider: providerID, agent })
+    ctx.instruments.modelUsageCounter.add(1, { ...ctx.commonAttrs,model: modelID, provider: providerID, agent })
   }
 
   accumulateSessionTotals(sessionID, totalTokens, assistant.cost, ctx)
@@ -245,7 +245,6 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
     if (isMetricEnabled("subtask.count", ctx)) {
       ctx.instruments.subtaskCounter.add(1, {
         ...ctx.commonAttrs,
-        "session.id": subtask.sessionID,
         agent: subtask.agent,
         "agent.type": "subagent",
       })
@@ -328,7 +327,6 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
     if (isMetricEnabled("tool.duration", ctx)) {
       ctx.instruments.toolDurationHistogram.record(duration_ms, {
         ...ctx.commonAttrs,
-        "session.id": toolPart.sessionID,
         tool_name: toolPart.tool,
         success,
       })

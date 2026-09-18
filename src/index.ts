@@ -8,6 +8,7 @@ import type {
   EventSessionCreated,
   EventSessionIdle,
   EventSessionError,
+  EventSessionDeleted,
   EventSessionStatus,
   EventMessageUpdated,
   EventMessagePartUpdated,
@@ -21,7 +22,7 @@ import { loadConfig, parseAttributePairs, resolveHelperPath, resolveLogLevel, ty
 import { probeEndpoint } from "./probe.ts"
 import { setupOtel, createInstruments, forceFlushOtel } from "./otel.ts"
 import { remoteParentContext } from "./trace-context.ts"
-import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus, handleRunStarted } from "./handlers/session.ts"
+import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionDeleted, handleSessionStatus, handleRunStarted } from "./handlers/session.ts"
 import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "./handlers/message.ts"
 import { handlePermissionUpdated, handlePermissionReplied } from "./handlers/permission.ts"
 import { handleSessionDiff, handleCommandExecuted } from "./handlers/activity.ts"
@@ -305,6 +306,10 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
         case "session.error":
           handleSessionError(event as EventSessionError, ctx)
           await flushTelemetry("session.error")
+          break
+        case "session.deleted":
+          handleSessionDeleted(event as EventSessionDeleted, ctx)
+          await flushTelemetry("session.deleted")
           break
         case "session.status":
           handleSessionStatus(event as EventSessionStatus, ctx)

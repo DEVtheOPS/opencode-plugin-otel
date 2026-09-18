@@ -232,7 +232,7 @@ describe("OPENCODE_DISABLE_METRICS", () => {
         "session.count", "token.usage", "cost.usage", "lines_of_code.count",
         "commit.count", "tool.duration", "cache.count", "session.duration",
         "message.count", "session.token.total", "session.cost.total",
-        "model.usage", "retry.count", "subtask.count",
+        "model.usage", "retry.count", "subtask.count", "session.lines_of_code.total",
       ]
       const { ctx, counters, histograms, gauges } = makeCtx("proj_test", all)
       const subtaskEvent = {
@@ -244,9 +244,9 @@ describe("OPENCODE_DISABLE_METRICS", () => {
 
       await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
       await handleMessageUpdated(makeAssistantMessage(), ctx)
+      handleSessionDiff(makeSessionDiff(), ctx)
       handleSessionIdle(makeSessionIdle("ses_1"), ctx)
       handleSessionStatus(makeSessionStatus("ses_1"), ctx)
-      handleSessionDiff(makeSessionDiff(), ctx)
       handleCommandExecuted(makeCommandExecuted("git commit -m 'test'"), ctx)
       await handleMessagePartUpdated(makeToolPart("running"), ctx)
       await handleMessagePartUpdated(makeToolPart("completed"), ctx)
@@ -264,6 +264,7 @@ describe("OPENCODE_DISABLE_METRICS", () => {
       expect(counters.subtask.calls).toHaveLength(0)
       expect(histograms.tool.calls).toHaveLength(0)
       expect(histograms.sessionDuration.calls).toHaveLength(0)
+      expect(histograms.sessionLinesTotal.calls).toHaveLength(0)
       expect(gauges.sessionToken.calls).toHaveLength(0)
       expect(gauges.sessionCost.calls).toHaveLength(0)
     })

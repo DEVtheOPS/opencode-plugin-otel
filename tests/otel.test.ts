@@ -8,7 +8,8 @@ import { OTLPMetricExporter as OTLPProtoMetricExporter } from "@opentelemetry/ex
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc"
 import { OTLPTraceExporter as OTLPHttpTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { OTLPTraceExporter as OTLPProtoTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto"
-import { buildResource, forceFlushOtel, setupOtel, type OtelProviders } from "../src/otel.ts"
+import type { Meter } from "@opentelemetry/api"
+import { buildResource, createInstruments, forceFlushOtel, setupOtel, type OtelProviders } from "../src/otel.ts"
 
 let providers: OtelProviders | undefined
 
@@ -121,6 +122,61 @@ describe("setupOtel", () => {
     expect(exporters.metric).toBeInstanceOf(OTLPHttpMetricExporter)
     expect(exporters.log).toBeInstanceOf(OTLPHttpLogExporter)
     expect(exporters.trace).toBeInstanceOf(OTLPHttpTraceExporter)
+  })
+})
+
+describe("createInstruments", () => {
+  /**
+   * Records the instrument names and kinds the meter is asked for, without an SDK. The global
+   * provider cannot be swapped here — the OTel API only accepts one registration per process and
+   * the `setupOtel` tests above register first — so the meter is injected directly.
+   */
+  function collectInstrumentNames(prefix = "opencode.") {
+    const seen: Array<{ kind: string; name: string }> = []
+    const fakeMeter = {
+      createCounter: (name: string) => { seen.push({ kind: "counter", name }); return {} },
+      createHistogram: (name: string) => { seen.push({ kind: "histogram", name }); return {} },
+      createGauge: (name: string) => { seen.push({ kind: "gauge", name }); return {} },
+    } as unknown as Meter
+    createInstruments(prefix, fakeMeter)
+    return seen.map((s) => `${s.kind}:${s.name}`).sort()
+  }
+
+  /**
+   * Metric names and their instrument kinds are the plugin's public contract — dashboards and
+   * alert rules key off both, and each name's suffix is the OPENCODE_DISABLE_METRICS key.
+   */
+  const EXPECTED = [
+    "counter:opencode.cache.count",
+    "counter:opencode.commit.count",
+    "counter:opencode.cost.usage",
+    "counter:opencode.lines_of_code.count",
+    "counter:opencode.message.count",
+    "counter:opencode.model.usage",
+    "counter:opencode.retry.count",
+    "counter:opencode.session.count",
+    "counter:opencode.subtask.count",
+    "counter:opencode.token.usage",
+    "histogram:opencode.session.cost.total",
+    "histogram:opencode.session.duration",
+    "histogram:opencode.session.lines_of_code.total",
+    "histogram:opencode.session.token.total",
+    "histogram:opencode.tool.duration",
+  ].sort()
+
+  test("registers every metric with the expected name and kind", () => {
+    expect(collectInstrumentNames()).toEqual(EXPECTED)
+  })
+
+  test("honours a custom metric prefix", () => {
+    expect(collectInstrumentNames("claude_code.")).toEqual(
+      EXPECTED.map((entry) => entry.replace("opencode.", "claude_code.")),
+    )
+  })
+
+  test("does not register a bare lines_of_code.total", () => {
+    expect(collectInstrumentNames()).not.toContain("histogram:opencode.lines_of_code.total")
+    expect(collectInstrumentNames()).not.toContain("gauge:opencode.lines_of_code.total")
   })
 })
 

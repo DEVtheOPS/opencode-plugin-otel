@@ -1,4 +1,4 @@
-import type { Context, Counter, Gauge, Histogram, Span, SpanContext, Tracer } from "@opentelemetry/api"
+import type { Context, Counter, Histogram, Span, SpanContext, Tracer } from "@opentelemetry/api"
 import type { LogRecord } from "@opentelemetry/api-logs"
 
 /** Numeric priority map for log levels; higher value = higher severity. */
@@ -41,7 +41,7 @@ export type Instruments = {
   tokenCounter: Counter
   costCounter: Counter
   linesCounter: Counter
-  linesTotalGauge: Gauge
+  sessionLinesTotal: Histogram
   commitCounter: Counter
   toolDurationHistogram: Histogram
   cacheCounter: Counter
@@ -57,7 +57,7 @@ export type Instruments = {
 /** Session role emitted by opencode: either the primary/root agent or a spawned subagent. */
 export type SessionAgentType = "primary" | "subagent"
 
-/** Accumulated per-session totals used for gauge snapshots on session.idle. */
+/** Accumulated per-session totals used for histogram snapshots on session.idle. */
 export type SessionTotals = {
   startMs: number
   tokens: number

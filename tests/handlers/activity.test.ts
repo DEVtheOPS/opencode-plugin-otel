@@ -95,9 +95,9 @@ describe("handleSessionDiff", () => {
     // Cumulative goes {additions:10, deletions:0} -> {additions:5, deletions:5}.
     // Delta is {added:-5, removed:+5}. Negative added is skipped; positive removed
     // is emitted. Counter ends at added=10, removed=5 while the authoritative live
-    // cumulative is added=5, removed=5 — the counter is GROSS, not net. Live
-    // cumulative state is surfaced via linesTotalGauge (see next test).
-    const { ctx, counters, gauges } = makeCtx()
+    // cumulative is added=5, removed=5 — the counter is GROSS, not net. The net
+    // per-session values are surfaced by session.lines_of_code.total on session.idle.
+    const { ctx, counters } = makeCtx()
     handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 10, deletions: 0 }]), ctx)
     handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 5, deletions: 5 }]), ctx)
 
@@ -105,21 +105,7 @@ describe("handleSessionDiff", () => {
     const removed = counters.lines.calls.filter((c) => c.attrs["type"] === "removed").map((c) => c.value)
     expect(added).toEqual([10])
     expect(removed).toEqual([5])
-
-    const gaugeAdded = gauges.linesTotal.calls.filter((c) => c.attrs["type"] === "added").map((c) => c.value)
-    const gaugeRemoved = gauges.linesTotal.calls.filter((c) => c.attrs["type"] === "removed").map((c) => c.value)
-    expect(gaugeAdded).toEqual([10, 5])
-    expect(gaugeRemoved).toEqual([0, 5])
-  })
-
-  test("linesTotalGauge records cumulative totals, including zero after revert", () => {
-    const { ctx, gauges } = makeCtx()
-    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 5, deletions: 2 }]), ctx)
-    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 0, deletions: 0 }]), ctx)
-    const added = gauges.linesTotal.calls.filter((c) => c.attrs["type"] === "added").map((c) => c.value)
-    const removed = gauges.linesTotal.calls.filter((c) => c.attrs["type"] === "removed").map((c) => c.value)
-    expect(added).toEqual([5, 0])
-    expect(removed).toEqual([2, 0])
+    expect(ctx.sessionDiffTotals.get("ses_1")).toEqual({ additions: 5, deletions: 5 })
   })
 
   test("tracks deltas independently per session", () => {
@@ -127,10 +113,10 @@ describe("handleSessionDiff", () => {
     handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 3, deletions: 0 }]), ctx)
     handleSessionDiff(makeSessionDiff("ses_2", [{ file: "b.ts", additions: 7, deletions: 0 }]), ctx)
     handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 5, deletions: 0 }]), ctx)
-    const ses1 = counters.lines.calls.filter((c) => c.attrs["session.id"] === "ses_1").map((c) => c.value)
-    const ses2 = counters.lines.calls.filter((c) => c.attrs["session.id"] === "ses_2").map((c) => c.value)
-    expect(ses1).toEqual([3, 2])
-    expect(ses2).toEqual([7])
+    const added = counters.lines.calls.filter((c) => c.attrs["type"] === "added").map((c) => c.value)
+    expect(added).toEqual([3, 7, 2])
+    expect(ctx.sessionDiffTotals.get("ses_1")).toEqual({ additions: 5, deletions: 0 })
+    expect(ctx.sessionDiffTotals.get("ses_2")).toEqual({ additions: 7, deletions: 0 })
   })
 })
 
