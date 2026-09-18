@@ -89,7 +89,14 @@ export type HandlerContext = {
   log: PluginLogger
   emitLog: (record: LogRecord) => void
   instruments: Instruments
+  /** Attributes for emitted spans and log events: the configured span attributes plus `project.id`. */
   commonAttrs: CommonAttrs
+  /**
+   * Attributes for metric data points: the configured span attributes only. Identifiers that are
+   * useful for drill-down but unbounded as Prometheus labels — `project.id`, `session.id` — belong
+   * on spans and log events, never here.
+   */
+  metricAttrs: CommonAttrs
   pendingToolSpans: Map<string, PendingToolSpan>
   pendingPermissions: Map<string, PendingPermission>
   sessionTotals: Map<string, SessionTotals>

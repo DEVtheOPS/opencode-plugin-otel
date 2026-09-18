@@ -31,10 +31,10 @@ export function handleSessionDiff(e: EventSessionDiff, ctx: HandlerContext) {
 
   if (linesEnabled) {
     if (deltaAdded > 0) {
-      ctx.instruments.linesCounter.add(deltaAdded, { ...ctx.commonAttrs, type: "added" })
+      ctx.instruments.linesCounter.add(deltaAdded, { ...ctx.metricAttrs, type: "added" })
     }
     if (deltaRemoved > 0) {
-      ctx.instruments.linesCounter.add(deltaRemoved, { ...ctx.commonAttrs, type: "removed" })
+      ctx.instruments.linesCounter.add(deltaRemoved, { ...ctx.metricAttrs, type: "removed" })
     }
   }
 
@@ -58,7 +58,7 @@ export function handleCommandExecuted(e: EventCommandExecuted, ctx: HandlerConte
   const { agentName, agentType } = getSessionAgentMeta(e.properties.sessionID, ctx)
 
   if (isMetricEnabled("commit.count", ctx)) {
-    ctx.instruments.commitCounter.add(1, ctx.commonAttrs)
+    ctx.instruments.commitCounter.add(1, ctx.metricAttrs)
     ctx.log("debug", "otel: commit counter incremented", { sessionID: e.properties.sessionID })
   }
   ctx.emitLog({

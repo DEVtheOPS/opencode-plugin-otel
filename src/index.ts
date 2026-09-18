@@ -119,10 +119,12 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
   const messageOutputs = new Map()
   const llmRequestContexts = new Map()
   const { disabledMetrics, disabledTraces } = config
+  const spanAttributePairs = parseAttributePairs(config.spanAttributes)
   const commonAttrs = {
-    ...parseAttributePairs(config.spanAttributes),
+    ...spanAttributePairs,
     "project.id": project.id,
   } as const
+  const metricAttrs = { ...spanAttributePairs } as const
 
   if (disabledMetrics.size > 0) {
     await log("info", "metrics disabled", { disabled: [...disabledMetrics] })
@@ -148,6 +150,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     emitLog,
     instruments,
     commonAttrs,
+    metricAttrs,
     pendingToolSpans,
     pendingPermissions,
     sessionTotals,

@@ -213,6 +213,7 @@ export function makeCtx(
     },
     instruments,
     commonAttrs: { "project.id": projectID, ...extraCommonAttrs },
+    metricAttrs: { ...extraCommonAttrs },
     pendingToolSpans: new Map(),
     pendingPermissions: new Map(),
     sessionTotals: new Map(),

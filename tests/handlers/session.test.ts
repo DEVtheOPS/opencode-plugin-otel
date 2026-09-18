@@ -73,10 +73,10 @@ describe("handleSessionCreated", () => {
     expect(call.extra?.["sessionID"]).toBe("ses_1")
   })
 
-  test("includes project.id in counter attrs", async () => {
+  test("does not include project.id in counter attrs", async () => {
     const { ctx, counters } = makeCtx("proj_abc")
     await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    expect(counters.session.calls.at(0)!.attrs["project.id"]).toBe("proj_abc")
+    expect(counters.session.calls.at(0)!.attrs["project.id"]).toBeUndefined()
   })
 
   test("stores session totals with startMs", async () => {
@@ -230,7 +230,7 @@ describe("handleSessionDeleted", () => {
     handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
     expect(histograms.sessionLinesTotal.calls).toHaveLength(2)
     for (const call of histograms.sessionLinesTotal.calls) {
-      expect(call.attrs["project.id"]).toBe("proj_test")
+      expect(call.attrs["project.id"]).toBeUndefined()
       expect(call.attrs["team"]).toBe("platform")
       expect(call.attrs["session.id"]).toBeUndefined()
     }

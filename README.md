@@ -51,7 +51,7 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 | `opencode.retry.count` | Counter | API retries observed via `session.status` events |
 | `opencode.subtask.count` | Counter | Sub-agent invocations observed via `subtask` message parts |
 
-All metrics are **low-cardinality by design**. `session.id` is deliberately *not* a metric label — it appears only on spans and log events, where per-session drill-down belongs and high cardinality is acceptable. Metric labels are limited to bounded dimensions (`project.id`, `model`, `provider`, `agent`, `agent.type`, `type`, `tool_name`, `success`, `is_subagent`) plus anything you add yourself via `OPENCODE_SPAN_ATTRIBUTES`. Keep those bounded too: every distinct label combination is a separate time series, and a histogram multiplies it by its bucket count (20 series per combination at the default boundaries).
+All metrics are **low-cardinality by design**. `session.id` and `project.id` are deliberately *not* metric labels — they appear only on spans and log events, where per-session and per-project drill-down belongs and high cardinality is acceptable. `project.id` is derived from the project directory, so it stays small for interactive use but grows without bound in CI, where every checkout can be a fresh path. Metric labels are limited to bounded dimensions (`model`, `provider`, `agent`, `agent.type`, `type`, `tool_name`, `success`, `is_subagent`) plus anything you add yourself via `OPENCODE_SPAN_ATTRIBUTES`. Keep those bounded too: every distinct label combination is a separate time series, and a histogram multiplies it by its bucket count (20 series per combination at the default boundaries).
 
 ### Log events
 
@@ -195,7 +195,7 @@ export OPENCODE_SPAN_ATTRIBUTES="team=platform,deployment.environment=production
 - Use `OPENCODE_RESOURCE_ATTRIBUTES` for producer metadata on the OTel Resource.
 - Use `OPENCODE_SPAN_ATTRIBUTES` for attributes that need to appear on each span, log event, and metric data point for filtering or grouping in backends.
 
-> **Watch the cardinality.** These pairs land on every metric data point as labels, so their values are multiplied by every other label and by the bucket count of each histogram. Use bounded values (`team`, `deployment.environment`, `service.version`) and avoid per-request or per-user values. A high-cardinality value here has exactly the same effect as the `session.id` label this plugin deliberately keeps off metrics — the only difference is that the plugin cannot bound it for you, so it is your configuration rather than the plugin that decides how many series get created.
+> **Watch the cardinality.** These pairs land on every metric data point as labels, so their values are multiplied by every other label and by the bucket count of each histogram. Use bounded values (`team`, `deployment.environment`, `service.version`) and avoid per-request or per-user values. A high-cardinality value here has exactly the same effect as the `session.id` and `project.id` labels this plugin deliberately keeps off metrics — the only difference is that the plugin cannot bound it for you, so it is your configuration rather than the plugin that decides how many series get created.
 
 ### Dynamic headers
 

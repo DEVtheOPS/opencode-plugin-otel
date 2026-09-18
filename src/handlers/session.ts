@@ -88,7 +88,7 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
   const isSubagent = !!parentID
   const agentType: SessionAgentType = isSubagent ? "subagent" : "primary"
   if (isMetricEnabled("session.count", ctx)) {
-    ctx.instruments.sessionCounter.add(1, { ...ctx.commonAttrs, is_subagent: isSubagent })
+    ctx.instruments.sessionCounter.add(1, { ...ctx.metricAttrs, is_subagent: isSubagent })
   }
   setBoundedMap(ctx.sessionTotals, sessionID, { startMs: createdAt, tokens: 0, cost: 0, messages: 0, agent: "unknown", agentType })
 
@@ -137,8 +137,8 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
  */
 function recordSessionLines(diff: { additions: number; deletions: number } | undefined, ctx: HandlerContext) {
   if (!diff || !isMetricEnabled("session.lines_of_code.total", ctx)) return
-  ctx.instruments.sessionLinesTotal.record(diff.additions, { ...ctx.commonAttrs, type: "added" })
-  ctx.instruments.sessionLinesTotal.record(diff.deletions, { ...ctx.commonAttrs, type: "removed" })
+  ctx.instruments.sessionLinesTotal.record(diff.additions, { ...ctx.metricAttrs, type: "added" })
+  ctx.instruments.sessionLinesTotal.record(diff.deletions, { ...ctx.metricAttrs, type: "removed" })
 }
 
 function sweepSession(sessionID: string, ctx: HandlerContext) {
@@ -183,13 +183,13 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
   if (totals) {
     duration_ms = Date.now() - totals.startMs
     if (isMetricEnabled("session.duration", ctx)) {
-      ctx.instruments.sessionDurationHistogram.record(duration_ms, ctx.commonAttrs)
+      ctx.instruments.sessionDurationHistogram.record(duration_ms, ctx.metricAttrs)
     }
     if (isMetricEnabled("session.token.total", ctx)) {
-      ctx.instruments.sessionTokenGauge.record(totals.tokens, ctx.commonAttrs)
+      ctx.instruments.sessionTokenGauge.record(totals.tokens, ctx.metricAttrs)
     }
     if (isMetricEnabled("session.cost.total", ctx)) {
-      ctx.instruments.sessionCostGauge.record(totals.cost, ctx.commonAttrs)
+      ctx.instruments.sessionCostGauge.record(totals.cost, ctx.metricAttrs)
     }
   }
 
@@ -358,7 +358,7 @@ export function handleSessionStatus(e: EventSessionStatus, ctx: HandlerContext) 
   const { sessionID, status } = e.properties
   const { attempt, message: retryMessage } = status
   if (isMetricEnabled("retry.count", ctx)) {
-    ctx.instruments.retryCounter.add(1, ctx.commonAttrs)
+    ctx.instruments.retryCounter.add(1, ctx.metricAttrs)
     ctx.log("debug", "otel: retry counter incremented", { sessionID, attempt, retryMessage })
   }
 }

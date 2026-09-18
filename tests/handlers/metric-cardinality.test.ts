@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test"
-import { handleSessionCreated, handleSessionIdle, handleSessionDeleted, handleSessionStatus } from "../../src/handlers/session.ts"
+import { handleSessionCreated, handleSessionIdle, handleSessionDeleted, handleSessionStatus, handleRunStarted } from "../../src/handlers/session.ts"
 import { handleMessageUpdated, handleMessagePartUpdated } from "../../src/handlers/message.ts"
 import { handleSessionDiff, handleCommandExecuted } from "../../src/handlers/activity.ts"
 import { handlePermissionUpdated, handlePermissionReplied } from "../../src/handlers/permission.ts"
@@ -124,7 +124,7 @@ const EXPECTED_LOG_BODIES = [
 ]
 
 describe("metric cardinality", () => {
-  test("no metric data point carries session.id (covers instruments registered in MockContext)", async () => {
+  test("no metric data point carries session.id or project.id (covers instruments registered in MockContext)", async () => {
     const mocks = makeCtx("proj_test", [], [], true, { team: "platform" })
     const { ctx } = mocks
 
@@ -160,13 +160,13 @@ describe("metric cardinality", () => {
     for (const [name, spy] of instruments) {
       for (const call of spy.calls) {
         expect(call.attrs["session.id"], `instrument "${name}" leaked session.id`).toBeUndefined()
-        expect(call.attrs["project.id"]).toBe("proj_test")
-        expect(call.attrs["team"]).toBe("platform")
+        expect(call.attrs["project.id"], `instrument "${name}" leaked project.id`).toBeUndefined()
+        expect(call.attrs["team"], `instrument "${name}" lost the configured span attributes`).toBe("platform")
       }
     }
   })
 
-  test("every handler-reachable log event still carries session.id", async () => {
+  test("every handler-reachable log event still carries session.id and project.id", async () => {
     const { ctx, logger } = makeCtx()
     await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     await handleMessageUpdated(makeAssistantMessage(), ctx)
@@ -188,13 +188,18 @@ describe("metric cardinality", () => {
 
     for (const record of logger.records) {
       expect(record.attributes?.["session.id"], `log event "${record.body}" lost session.id`).toBe("ses_1")
+      expect(record.attributes?.["project.id"], `log event "${record.body}" lost project.id`).toBe("proj_test")
     }
   })
 
-  test("subagent session span still carries session.id", () => {
+  test("spans still carry session.id and project.id", () => {
     const { ctx, tracer } = makeCtx()
-    handleSessionCreated(makeSessionCreated("ses_child", "ses_parent"), ctx)
-    expect(tracer.spans).toHaveLength(1)
-    expect(tracer.spans[0]!.attributes["session.id"]).toBe("ses_child")
+    handleRunStarted("user_1", "ses_1", "build", "prompt", "anthropic/claude", 900, ctx)
+    handleSessionCreated(makeSessionCreated("ses_child", "ses_1"), ctx)
+    expect(tracer.spans.length).toBeGreaterThan(0)
+    for (const span of tracer.spans) {
+      expect(span.attributes["project.id"], `span "${span.name}" lost project.id`).toBe("proj_test")
+    }
+    expect(tracer.spans.find((s) => s.attributes["session.id"] === "ses_child")).toBeDefined()
   })
 })

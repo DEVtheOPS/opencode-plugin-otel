@@ -426,10 +426,10 @@ describe("handleMessagePartUpdated — subtask parts", () => {
     expect(record.attributes?.["prompt_length"]).toBe("Create a plan".length)
   })
 
-  test("includes project.id in subtask counter attrs", async () => {
+  test("does not include project.id in subtask counter attrs", async () => {
     const { ctx, counters } = makeCtx("proj_xyz")
     await handleMessagePartUpdated(makeSubtaskPartUpdated(), ctx)
-    expect(counters.subtask.calls.at(0)!.attrs["project.id"]).toBe("proj_xyz")
+    expect(counters.subtask.calls.at(0)!.attrs["project.id"]).toBeUndefined()
   })
 
   test("does not record subtask counter when subtask.count is disabled", async () => {
