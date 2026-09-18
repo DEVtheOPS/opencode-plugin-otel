@@ -1,5 +1,5 @@
 import { logs } from "@opentelemetry/api-logs"
-import { metrics, trace } from "@opentelemetry/api"
+import { metrics, trace, type Meter } from "@opentelemetry/api"
 import { LoggerProvider, BatchLogRecordProcessor } from "@opentelemetry/sdk-logs"
 import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics"
 import { BasicTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-base"
@@ -144,9 +144,11 @@ export async function setupOtel(
   return { meterProvider, loggerProvider, tracerProvider }
 }
 
-/** Creates all metric instruments using the global `MeterProvider`. Metric names are prefixed with `prefix`. */
-export function createInstruments(prefix: string): Instruments {
-  const meter = metrics.getMeter("com.opencode")
+/**
+ * Creates all metric instruments using the global `MeterProvider`, or `meter` when one is supplied.
+ * Metric names are prefixed with `prefix`.
+ */
+export function createInstruments(prefix: string, meter: Meter = metrics.getMeter("com.opencode")): Instruments {
   return {
     sessionCounter: meter.createCounter(`${prefix}session.count`, {
       unit: "{session}",
@@ -162,11 +164,11 @@ export function createInstruments(prefix: string): Instruments {
     }),
     linesCounter: meter.createCounter(`${prefix}lines_of_code.count`, {
       unit: "{line}",
-      description: "Gross positive churn of lines added/removed across a session. Emits the positive delta vs. the previous session.diff; negative deltas (cumulative shrinkage) are dropped, so sums do not reconcile to net after any revert. Use lines_of_code.total for the authoritative live cumulative.",
+      description: "Gross positive churn of lines added/removed across a session. Emits the positive delta vs. the previous session.diff; negative deltas (cumulative shrinkage) are dropped, so sums do not reconcile to net after any revert. Use session.lines_of_code.total for the reverting net per-session total.",
     }),
-    linesTotalGauge: meter.createGauge(`${prefix}lines_of_code.total`, {
+    sessionLinesTotal: meter.createHistogram(`${prefix}session.lines_of_code.total`, {
       unit: "{line}",
-      description: "Authoritative live cumulative lines added/removed for the current session. Mirrors opencode's session.diff cumulative value on every event; tracks partial and full reverts faithfully.",
+      description: "Net lines added/removed from opencode's cumulative session.diff, recorded once when the session ends (session.deleted, or session.error). Two observations per session, split by type=added|removed. Unlike lines_of_code.count, this reflects partial and full reverts.",
     }),
     commitCounter: meter.createCounter(`${prefix}commit.count`, {
       unit: "{commit}",

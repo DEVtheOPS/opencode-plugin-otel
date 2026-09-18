@@ -177,10 +177,11 @@ describe("handleMessageUpdated", () => {
     await handleMessageUpdated(makeAssistantMessageUpdated({ sessionID: "ses_1", modelID: "claude-3-5-sonnet" }), ctx)
     expect(counters.message.calls).toHaveLength(1)
     expect(counters.message.calls.at(0)!.value).toBe(1)
-    expect(counters.message.calls.at(0)!.attrs["session.id"]).toBe("ses_1")
+    expect(counters.message.calls.at(0)!.attrs["session.id"]).toBeUndefined()
+    expect(counters.message.calls.at(0)!.attrs["model"]).toBe("claude-3-5-sonnet")
   })
 
-  test("increments model usage counter with session.id, model and provider", async () => {
+  test("increments model usage counter with model and provider", async () => {
     const { ctx, counters } = makeCtx()
     await handleMessageUpdated(
       makeAssistantMessageUpdated({ sessionID: "ses_1", modelID: "claude-3-5-sonnet", providerID: "anthropic" }),
@@ -188,7 +189,7 @@ describe("handleMessageUpdated", () => {
     )
     expect(counters.modelUsage.calls).toHaveLength(1)
     const call = counters.modelUsage.calls.at(0)!
-    expect(call.attrs["session.id"]).toBe("ses_1")
+    expect(call.attrs["session.id"]).toBeUndefined()
     expect(call.attrs["model"]).toBe("claude-3-5-sonnet")
     expect(call.attrs["provider"]).toBe("anthropic")
   })
@@ -398,14 +399,15 @@ describe("handleMessageUpdated — agent attribute", () => {
 })
 
 describe("handleMessagePartUpdated — subtask parts", () => {
-  test("increments subtask counter with agent and session.id attrs", async () => {
+  test("increments subtask counter with agent attrs", async () => {
     const { ctx, counters } = makeCtx()
     await handleMessagePartUpdated(makeSubtaskPartUpdated({ sessionID: "ses_1", agent: "build" }), ctx)
     expect(counters.subtask.calls).toHaveLength(1)
     const call = counters.subtask.calls.at(0)!
     expect(call.value).toBe(1)
     expect(call.attrs["agent"]).toBe("build")
-    expect(call.attrs["session.id"]).toBe("ses_1")
+    expect(call.attrs["agent.type"]).toBe("subagent")
+    expect(call.attrs["session.id"]).toBeUndefined()
   })
 
   test("emits subtask_invoked log record", async () => {
@@ -424,10 +426,10 @@ describe("handleMessagePartUpdated — subtask parts", () => {
     expect(record.attributes?.["prompt_length"]).toBe("Create a plan".length)
   })
 
-  test("includes project.id in subtask counter attrs", async () => {
+  test("does not include project.id in subtask counter attrs", async () => {
     const { ctx, counters } = makeCtx("proj_xyz")
     await handleMessagePartUpdated(makeSubtaskPartUpdated(), ctx)
-    expect(counters.subtask.calls.at(0)!.attrs["project.id"]).toBe("proj_xyz")
+    expect(counters.subtask.calls.at(0)!.attrs["project.id"]).toBeUndefined()
   })
 
   test("does not record subtask counter when subtask.count is disabled", async () => {

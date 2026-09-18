@@ -1,6 +1,6 @@
 import type { HandlerContext, Instruments } from "../src/types.ts"
 import type { LogRecord } from "@opentelemetry/api-logs"
-import type { Counter, Gauge, Histogram, Span, SpanOptions, Tracer, Context, SpanContext, SpanStatus, Attributes } from "@opentelemetry/api"
+import type { Counter, Histogram, Span, SpanOptions, Tracer, Context, SpanContext, SpanStatus, Attributes } from "@opentelemetry/api"
 import { ROOT_CONTEXT, SpanStatusCode, trace } from "@opentelemetry/api"
 
 export type SpyCounter = {
@@ -9,11 +9,6 @@ export type SpyCounter = {
 }
 
 export type SpyHistogram = {
-  calls: Array<{ value: number; attrs: Record<string, unknown> }>
-  record(value: number, attrs?: Record<string, unknown>): void
-}
-
-export type SpyGauge = {
   calls: Array<{ value: number; attrs: Record<string, unknown> }>
   record(value: number, attrs?: Record<string, unknown>): void
 }
@@ -60,11 +55,6 @@ function makeCounter(): SpyCounter {
 
 function makeHistogram(): SpyHistogram {
   const spy: SpyHistogram = { calls: [], record(v, a = {}) { spy.calls.push({ value: v, attrs: a }) } }
-  return spy
-}
-
-function makeGauge(): SpyGauge {
-  const spy: SpyGauge = { calls: [], record(v, a = {}) { spy.calls.push({ value: v, attrs: a }) } }
   return spy
 }
 
@@ -160,11 +150,11 @@ export type MockContext = {
   histograms: {
     tool: SpyHistogram
     sessionDuration: SpyHistogram
+    sessionLinesTotal: SpyHistogram
   }
   gauges: {
     sessionToken: SpyHistogram
     sessionCost: SpyHistogram
-    linesTotal: SpyGauge
   }
   logger: SpyLogger
   pluginLog: SpyPluginLog
@@ -192,7 +182,7 @@ export function makeCtx(
   const sessionDurationHistogram = makeHistogram()
   const sessionTokenGauge = makeHistogram()
   const sessionCostGauge = makeHistogram()
-  const linesTotalGauge = makeGauge()
+  const sessionLinesTotal = makeHistogram()
   const logger = makeLogger()
   const pluginLog = makePluginLog()
   const tracer = makeTracer()
@@ -202,7 +192,7 @@ export function makeCtx(
     tokenCounter: token as unknown as Counter,
     costCounter: cost as unknown as Counter,
     linesCounter: lines as unknown as Counter,
-    linesTotalGauge: linesTotalGauge as unknown as Gauge,
+    sessionLinesTotal: sessionLinesTotal as unknown as Histogram,
     commitCounter: commit as unknown as Counter,
     toolDurationHistogram: toolHistogram as unknown as Histogram,
     cacheCounter: cache as unknown as Counter,
@@ -223,6 +213,7 @@ export function makeCtx(
     },
     instruments,
     commonAttrs: { "project.id": projectID, ...extraCommonAttrs },
+    metricAttrs: { ...extraCommonAttrs },
     pendingToolSpans: new Map(),
     pendingPermissions: new Map(),
     sessionTotals: new Map(),
@@ -249,8 +240,8 @@ export function makeCtx(
   return {
     ctx,
     counters: { session, token, cost, lines, commit, cache, message, modelUsage, retry, subtask },
-    histograms: { tool: toolHistogram, sessionDuration: sessionDurationHistogram },
-    gauges: { sessionToken: sessionTokenGauge, sessionCost: sessionCostGauge, linesTotal: linesTotalGauge },
+    histograms: { tool: toolHistogram, sessionDuration: sessionDurationHistogram, sessionLinesTotal },
+    gauges: { sessionToken: sessionTokenGauge, sessionCost: sessionCostGauge },
     logger,
     pluginLog,
     tracer,

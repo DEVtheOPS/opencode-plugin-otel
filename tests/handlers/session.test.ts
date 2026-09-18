@@ -1,7 +1,8 @@
 import { describe, test, expect } from "bun:test"
-import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionStatus } from "../../src/handlers/session.ts"
+import { handleSessionCreated, handleSessionIdle, handleSessionError, handleSessionDeleted, handleSessionStatus, handleRunStarted } from "../../src/handlers/session.ts"
+import { handleSessionDiff } from "../../src/handlers/activity.ts"
 import { makeCtx, makeTracer } from "../helpers.ts"
-import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
+import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionDeleted, EventSessionStatus, EventSessionDiff } from "@opencode-ai/sdk"
 import type { Span } from "@opentelemetry/api"
 
 function makeSessionCreated(sessionID: string, createdAt = 1000, parentID?: string): EventSessionCreated {
@@ -30,6 +31,14 @@ function makeSessionError(sessionID: string, error?: { name: string }): EventSes
   } as unknown as EventSessionError
 }
 
+function makeSessionDiff(sessionID: string, diff: Array<{ file: string; additions: number; deletions: number }>): EventSessionDiff {
+  return { type: "session.diff", properties: { sessionID, diff } } as unknown as EventSessionDiff
+}
+
+function makeSessionDeleted(sessionID: string): EventSessionDeleted {
+  return { type: "session.deleted", properties: { info: { id: sessionID } } } as unknown as EventSessionDeleted
+}
+
 function makeSessionStatus(sessionID: string, status: { type: "retry"; attempt: number; message: string; next: number } | { type: "busy" } | { type: "idle" }): EventSessionStatus {
   return { type: "session.status", properties: { sessionID, status } } as unknown as EventSessionStatus
 }
@@ -41,7 +50,8 @@ describe("handleSessionCreated", () => {
     expect(counters.session.calls).toHaveLength(1)
     const call = counters.session.calls.at(0)!
     expect(call.value).toBe(1)
-    expect(call.attrs["session.id"]).toBe("ses_1")
+    expect(call.attrs["session.id"]).toBeUndefined()
+    expect(call.attrs["is_subagent"]).toBe(false)
   })
 
   test("emits session.created log record with correct timestamp", async () => {
@@ -63,10 +73,10 @@ describe("handleSessionCreated", () => {
     expect(call.extra?.["sessionID"]).toBe("ses_1")
   })
 
-  test("includes project.id in counter attrs", async () => {
+  test("does not include project.id in counter attrs", async () => {
     const { ctx, counters } = makeCtx("proj_abc")
     await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
-    expect(counters.session.calls.at(0)!.attrs["project.id"]).toBe("proj_abc")
+    expect(counters.session.calls.at(0)!.attrs["project.id"]).toBeUndefined()
   })
 
   test("stores session totals with startMs", async () => {
@@ -118,7 +128,7 @@ describe("handleSessionIdle", () => {
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
     expect(histograms.sessionDuration.calls).toHaveLength(1)
     expect(histograms.sessionDuration.calls.at(0)!.value).toBeGreaterThan(0)
-    expect(histograms.sessionDuration.calls.at(0)!.attrs["session.id"]).toBe("ses_1")
+    expect(histograms.sessionDuration.calls.at(0)!.attrs["session.id"]).toBeUndefined()
   })
 
   test("records session token and cost histograms when totals exist", async () => {
@@ -130,6 +140,25 @@ describe("handleSessionIdle", () => {
     expect(gauges.sessionToken.calls.at(0)!.value).toBe(150)
     expect(gauges.sessionCost.calls).toHaveLength(1)
     expect(gauges.sessionCost.calls.at(0)!.value).toBe(0.03)
+  })
+
+  test("does not record the LOC histogram on idle", async () => {
+    const { ctx, histograms } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 10, deletions: 0 }]), ctx)
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    expect(histograms.sessionLinesTotal.calls).toHaveLength(0)
+  })
+
+  test("keeps the session diff baseline across idle so later turns emit true deltas", async () => {
+    const { ctx, counters } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 10, deletions: 0 }]), ctx)
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 25, deletions: 0 }]), ctx)
+    const added = counters.lines.calls.filter((c) => c.attrs["type"] === "added").map((c) => c.value)
+    expect(added).toEqual([10, 15])
+    expect(ctx.sessionDiffTotals.get("ses_1")).toEqual({ additions: 25, deletions: 0 })
   })
 
   test("emits total_tokens and total_messages in log record attributes", async () => {
@@ -151,6 +180,7 @@ describe("handleSessionIdle", () => {
     expect(histograms.sessionDuration.calls).toHaveLength(0)
     expect(gauges.sessionToken.calls).toHaveLength(0)
     expect(gauges.sessionCost.calls).toHaveLength(0)
+    expect(histograms.sessionLinesTotal.calls).toHaveLength(0)
   })
 
   test("removes sessionTotals entry on idle", async () => {
@@ -158,6 +188,103 @@ describe("handleSessionIdle", () => {
     await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     expect(ctx.sessionTotals.has("ses_1")).toBe(true)
     handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    expect(ctx.sessionTotals.has("ses_1")).toBe(false)
+  })
+})
+
+describe("handleSessionDeleted", () => {
+  test("records the session's net LOC once, diverging from the gross counter", async () => {
+    const { ctx, counters, histograms } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 10, deletions: 0 }]), ctx)
+    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 5, deletions: 5 }]), ctx)
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+
+    const added = histograms.sessionLinesTotal.calls.filter((c) => c.attrs["type"] === "added").map((c) => c.value)
+    const removed = histograms.sessionLinesTotal.calls.filter((c) => c.attrs["type"] === "removed").map((c) => c.value)
+    expect(added).toEqual([5])
+    expect(removed).toEqual([5])
+
+    const counterAdded = counters.lines.calls.filter((c) => c.attrs["type"] === "added").map((c) => c.value)
+    expect(counterAdded).toEqual([10])
+  })
+
+  test("records exactly one observation pair for a multi-turn session", async () => {
+    const { ctx, histograms } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 10, deletions: 0 }]), ctx)
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 25, deletions: 0 }]), ctx)
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+
+    const added = histograms.sessionLinesTotal.calls.filter((c) => c.attrs["type"] === "added").map((c) => c.value)
+    expect(added).toEqual([25])
+    expect(added.reduce((a, b) => a + b, 0)).toBe(25)
+  })
+
+  test("carries common attributes and no session.id on the LOC histogram", async () => {
+    const { ctx, histograms } = makeCtx("proj_test", [], [], true, { team: "platform" })
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 4, deletions: 1 }]), ctx)
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    expect(histograms.sessionLinesTotal.calls).toHaveLength(2)
+    for (const call of histograms.sessionLinesTotal.calls) {
+      expect(call.attrs["project.id"]).toBeUndefined()
+      expect(call.attrs["team"]).toBe("platform")
+      expect(call.attrs["session.id"]).toBeUndefined()
+    }
+  })
+
+  test("does not record when the session saw no diff", async () => {
+    const { ctx, histograms } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    expect(histograms.sessionLinesTotal.calls).toHaveLength(0)
+  })
+
+  test("does not record when session.lines_of_code.total is disabled", async () => {
+    const { ctx, histograms } = makeCtx("proj_test", ["session.lines_of_code.total"])
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 4, deletions: 1 }]), ctx)
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    expect(histograms.sessionLinesTotal.calls).toHaveLength(0)
+  })
+
+  test("does not record twice when error and deleted both fire", async () => {
+    const { ctx, histograms } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 4, deletions: 1 }]), ctx)
+    handleSessionError(makeSessionError("ses_1", { name: "Boom" }), ctx)
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    expect(histograms.sessionLinesTotal.calls).toHaveLength(2)
+  })
+
+  test("ends a lingering session span for a deleted subagent session", async () => {
+    const { ctx, tracer } = makeCtx()
+    handleRunStarted("user_parent", "ses_parent", "build", "prompt", "anthropic/claude", 900, ctx)
+    await handleSessionCreated(makeSessionCreated("ses_child", 1000, "ses_parent"), ctx)
+    const childSpan = tracer.spans.find((s) => s.attributes["session.id"] === "ses_child")!
+    handleSessionDeleted(makeSessionDeleted("ses_child"), ctx)
+    expect(ctx.sessionSpans.has("ses_child")).toBe(false)
+    expect(childSpan.ended).toBe(true)
+  })
+
+  test("ends a lingering run span when its session is deleted mid-run", async () => {
+    const { ctx, tracer } = makeCtx()
+    handleRunStarted("user_1", "ses_1", "build", "prompt", "anthropic/claude", 900, ctx)
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    expect(ctx.runSpans.has("user_1")).toBe(false)
+    expect(ctx.activeRuns.has("ses_1")).toBe(false)
+    expect(tracer.spans[0]!.ended).toBe(true)
+  })
+
+  test("clears the session diff baseline so state does not leak", async () => {
+    const { ctx } = makeCtx()
+    await handleSessionCreated(makeSessionCreated("ses_1"), ctx)
+    handleSessionDiff(makeSessionDiff("ses_1", [{ file: "a.ts", additions: 4, deletions: 1 }]), ctx)
+    handleSessionDeleted(makeSessionDeleted("ses_1"), ctx)
+    expect(ctx.sessionDiffTotals.has("ses_1")).toBe(false)
     expect(ctx.sessionTotals.has("ses_1")).toBe(false)
   })
 })
@@ -246,7 +373,7 @@ describe("handleSessionStatus", () => {
     handleSessionStatus(makeSessionStatus("ses_1", { type: "retry", attempt: 1, message: "rate limited", next: 5000 }), ctx)
     expect(counters.retry.calls).toHaveLength(1)
     expect(counters.retry.calls.at(0)!.value).toBe(1)
-    expect(counters.retry.calls.at(0)!.attrs["session.id"]).toBe("ses_1")
+    expect(counters.retry.calls.at(0)!.attrs["session.id"]).toBeUndefined()
   })
 
   test("ignores busy status", () => {

@@ -38,8 +38,8 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 | `opencode.session.count` | Counter | Incremented on each `session.created` event |
 | `opencode.token.usage` | Counter | Per token type: `input`, `output`, `reasoning`, `cacheRead`, `cacheCreation` |
 | `opencode.cost.usage` | Counter | USD cost per completed assistant message |
-| `opencode.lines_of_code.count` | Counter | **Gross positive churn, not a net total.** Emits the positive delta of `additions`/`deletions` since the previous `session.diff` for the same session; negative deltas (when opencode's cumulative `additions` or `deletions` shrinks vs. the last event) are dropped. Summing the counter therefore reports gross lines added/removed across forward transitions — it does *not* reconcile back to the session's current state after any revert (full or partial). Intra-message rewrites that opencode collapses in its per-message cumulative are not visible here at all. Use `opencode.lines_of_code.total` for the authoritative live cumulative. |
-| `opencode.lines_of_code.total` | Gauge | **Authoritative live cumulative lines added/removed for the session.** Refreshed on every `session.diff` with opencode's current cumulative value. Drops back to `0` if opencode reports a revert to baseline, and tracks partial reverts faithfully. Query this (not the counter) to answer "what does this session currently amount to". |
+| `opencode.lines_of_code.count` | Counter | **Gross positive churn, not a net total.** Emits the positive delta of `additions`/`deletions` since the previous `session.diff` for the same session; negative deltas (when opencode's cumulative `additions` or `deletions` shrinks vs. the last event) are dropped. Summing the counter therefore reports gross lines added/removed across forward transitions — it does *not* reconcile back to the session's current state after any revert (full or partial). Intra-message rewrites that opencode collapses in its per-message cumulative are not visible here at all. Net per-session totals are reported by `opencode.session.lines_of_code.total` when the session ends. |
+| `opencode.session.lines_of_code.total` | Histogram | **Net lines added/removed per session, recorded once when the session ends** (`session.deleted`, or `session.error` if the session errored first) from opencode's final cumulative `session.diff`. Two observations per session, split by `type=added` / `type=removed`. Because it reads the cumulative rather than the deltas, it tracks partial and full reverts faithfully — unlike the gross counter. It is deliberately **not** recorded on `session.idle`: idle fires once per *turn*, and opencode's `session.diff` is cumulative for the whole session, so recording there would add the running session total once per turn. The same values are attached to the run and session spans as `session.total_lines_added` / `session.total_lines_removed`. |
 | `opencode.commit.count` | Counter | Git commits detected via bash tool |
 | `opencode.tool.duration` | Histogram | Tool execution time in milliseconds |
 | `opencode.cache.count` | Counter | Cache activity per message: `type=cacheRead` or `type=cacheCreation` |
@@ -49,6 +49,9 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 | `opencode.session.cost.total` | Histogram | Total cost per session in USD, recorded on idle |
 | `opencode.model.usage` | Counter | Messages per model and provider |
 | `opencode.retry.count` | Counter | API retries observed via `session.status` events |
+| `opencode.subtask.count` | Counter | Sub-agent invocations observed via `subtask` message parts |
+
+All metrics are **low-cardinality by design**. `session.id` and `project.id` are deliberately *not* metric labels — they appear only on spans and log events, where per-session and per-project drill-down belongs and high cardinality is acceptable. `project.id` is derived from the project directory, so it stays small for interactive use but grows without bound in CI, where every checkout can be a fresh path. Metric labels are limited to bounded dimensions (`model`, `provider`, `agent`, `agent.type`, `type`, `tool_name`, `success`, `is_subagent`) plus anything you add yourself via `OPENCODE_SPAN_ATTRIBUTES`. Keep those bounded too: every distinct label combination is a separate time series, and a histogram multiplies it by its bucket count (20 series per combination at the default boundaries).
 
 ### Log events
 
@@ -63,6 +66,7 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 | `tool_result` | Tool completed or errored (duration, success, output size) |
 | `tool_decision` | Permission prompt answered (accept/reject) |
 | `commit` | Git commit detected |
+| `subtask_invoked` | Sub-agent invoked (includes `agent`, `description`, `prompt_length`) |
 
 ## Installation
 
@@ -105,7 +109,7 @@ The environment variables (set them in your shell profile — `~/.zshrc`, `~/.ba
 | `OPENCODE_OTLP_HEADERS` | *(unset)* | Comma-separated `key=value` headers added to all OTLP exports. **Keep out of version control — may contain sensitive auth tokens.** |
 | `OPENCODE_OTLP_HEADERS_HELPER` | *(unset)* | Executable script/binary that returns dynamic OTLP headers as JSON after an auth failure. Helper headers override `OPENCODE_OTLP_HEADERS`. |
 | `OPENCODE_RESOURCE_ATTRIBUTES` | *(unset)* | Comma-separated `key=value` pairs merged into the OTel resource. Example: `service.version=1.2.3,deployment.environment=production` |
-| `OPENCODE_SPAN_ATTRIBUTES` | *(unset)* | Comma-separated `key=value` pairs attached to every emitted span, log event, and metric data point. Example: `team=platform,deployment.environment=production` |
+| `OPENCODE_SPAN_ATTRIBUTES` | *(unset)* | Comma-separated `key=value` pairs attached to every emitted span, log event, and metric data point. Example: `team=platform,deployment.environment=production`. **Keep values low-cardinality** — they become metric labels, so an unbounded value (a session ID, request ID, or user ID) reintroduces the series explosion the plugin avoids elsewhere. |
 | `OPENCODE_OTLP_METRICS_TEMPORALITY` | *(unset)* | Metrics aggregation temporality: `delta`, `cumulative`, or `lowmemory`. Required for Datadog (`delta`). Copied to `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`. |
 | `OPENCODE_TRACEPARENT` | *(unset)* | W3C [`traceparent`](https://www.w3.org/TR/trace-context/#traceparent-header) string. When set, all spans are parented under this remote context so opencode traces nest inside a caller's trace (e.g. a CI job). Invalid values are logged and ignored. Note: with the default `ParentBased` sampler, a value with the sampled flag off (`...-00`) suppresses all trace export. |
 | `OPENCODE_TRACESTATE` | *(unset)* | W3C [`tracestate`](https://www.w3.org/TR/trace-context/#tracestate-header) string, parsed alongside `OPENCODE_TRACEPARENT` and attached to the remote parent context. Ignored unless a valid `OPENCODE_TRACEPARENT` is also set. |
@@ -191,6 +195,8 @@ export OPENCODE_SPAN_ATTRIBUTES="team=platform,deployment.environment=production
 - Use `OPENCODE_RESOURCE_ATTRIBUTES` for producer metadata on the OTel Resource.
 - Use `OPENCODE_SPAN_ATTRIBUTES` for attributes that need to appear on each span, log event, and metric data point for filtering or grouping in backends.
 
+> **Watch the cardinality.** These pairs land on every metric data point as labels, so their values are multiplied by every other label and by the bucket count of each histogram. Use bounded values (`team`, `deployment.environment`, `service.version`) and avoid per-request or per-user values. A high-cardinality value here has exactly the same effect as the `session.id` and `project.id` labels this plugin deliberately keeps off metrics — the only difference is that the plugin cannot bound it for you, so it is your configuration rather than the plugin that decides how many series get created.
+
 ### Dynamic headers
 
 Use `OPENCODE_OTLP_HEADERS_HELPER` when your collector requires short-lived authentication tokens. When this is set, the plugin prewarms the helper once during startup so the first export can use fresh credentials. If a later OTLP export fails with an authentication error (`401`/`403` for HTTP or `UNAUTHENTICATED`/`PERMISSION_DENIED` for gRPC), the plugin refreshes headers again, rebuilds the exporter, and retries the failed export once.
@@ -241,8 +247,8 @@ export OPENCODE_DISABLE_METRICS="retry.count"
 # Disable multiple metrics
 export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.total,session.cost.total,model.usage,retry.count,message.count"
 
-# Disable the new per-session cumulative gauge while keeping the delta counter
-export OPENCODE_DISABLE_METRICS="lines_of_code.total"
+# Disable the per-session net LOC histogram while keeping the gross churn counter
+export OPENCODE_DISABLE_METRICS="session.lines_of_code.total"
 ```
 
 #### opencode-only metrics
@@ -250,13 +256,14 @@ export OPENCODE_DISABLE_METRICS="lines_of_code.total"
 The following metrics are specific to opencode and have no equivalent in Claude Code's built-in monitoring. If you are using a Claude Code dashboard and want to avoid cluttering it with opencode-only metrics, you can disable them:
 
 ```bash
-export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.total,session.cost.total,model.usage,retry.count,message.count"
+export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.total,session.cost.total,model.usage,retry.count,message.count,session.lines_of_code.total"
 ```
 
 | Metric suffix | Why it's opencode-only |
 |---------------|------------------------|
 | `cache.count` | Tracks cache read/write activity as occurrence counts — not a Claude Code signal |
 | `session.duration` | Session wall-clock duration — not emitted by Claude Code |
+| `session.lines_of_code.total` | Per-session net LOC histogram recorded when the session ends — not emitted by Claude Code |
 | `session.token.total` | Per-session token histogram — not emitted by Claude Code |
 | `session.cost.total` | Per-session cost histogram — not emitted by Claude Code |
 | `model.usage` | Per-model message counter — not emitted by Claude Code |

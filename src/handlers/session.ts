@@ -1,6 +1,6 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { SpanStatusCode } from "@opentelemetry/api"
-import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
+import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus, EventSessionDeleted } from "@opencode-ai/sdk"
 import {
   AGENT_NAME,
   INPUT_MIME_TYPE,
@@ -88,7 +88,7 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
   const isSubagent = !!parentID
   const agentType: SessionAgentType = isSubagent ? "subagent" : "primary"
   if (isMetricEnabled("session.count", ctx)) {
-    ctx.instruments.sessionCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, is_subagent: isSubagent })
+    ctx.instruments.sessionCounter.add(1, { ...ctx.metricAttrs, is_subagent: isSubagent })
   }
   setBoundedMap(ctx.sessionTotals, sessionID, { startMs: createdAt, tokens: 0, cost: 0, messages: 0, agent: "unknown", agentType })
 
@@ -129,6 +129,18 @@ export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext
   return ctx.log("info", "otel: session.created", { sessionID, createdAt, isSubagent })
 }
 
+/**
+ * Records a session's net lines added/removed once, when the session ends, and drops the diff
+ * baseline so a later end event for the same session cannot record it twice. `session.idle`
+ * fires once per *turn*, not once per session, and opencode's `session.diff` is cumulative for
+ * the whole session — so recording there would add the running session total once per turn.
+ */
+function recordSessionLines(diff: { additions: number; deletions: number } | undefined, ctx: HandlerContext) {
+  if (!diff || !isMetricEnabled("session.lines_of_code.total", ctx)) return
+  ctx.instruments.sessionLinesTotal.record(diff.additions, { ...ctx.metricAttrs, type: "added" })
+  ctx.instruments.sessionLinesTotal.record(diff.deletions, { ...ctx.metricAttrs, type: "removed" })
+}
+
 function sweepSession(sessionID: string, ctx: HandlerContext) {
   for (const [id, perm] of ctx.pendingPermissions) {
     if (perm.sessionID === sessionID) ctx.pendingPermissions.delete(id)
@@ -161,24 +173,23 @@ function sweepSession(sessionID: string, ctx: HandlerContext) {
 export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
   const sessionID = e.properties.sessionID
   const totals = ctx.sessionTotals.get(sessionID)
+  const diff = ctx.sessionDiffTotals.get(sessionID)
   const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
   ctx.sessionTotals.delete(sessionID)
-  ctx.sessionDiffTotals.delete(sessionID)
   sweepSession(sessionID, ctx)
 
-  const attrs = { ...ctx.commonAttrs, "session.id": sessionID }
   let duration_ms: number | undefined
 
   if (totals) {
     duration_ms = Date.now() - totals.startMs
     if (isMetricEnabled("session.duration", ctx)) {
-      ctx.instruments.sessionDurationHistogram.record(duration_ms, attrs)
+      ctx.instruments.sessionDurationHistogram.record(duration_ms, ctx.metricAttrs)
     }
     if (isMetricEnabled("session.token.total", ctx)) {
-      ctx.instruments.sessionTokenGauge.record(totals.tokens, attrs)
+      ctx.instruments.sessionTokenGauge.record(totals.tokens, ctx.metricAttrs)
     }
     if (isMetricEnabled("session.cost.total", ctx)) {
-      ctx.instruments.sessionCostGauge.record(totals.cost, attrs)
+      ctx.instruments.sessionCostGauge.record(totals.cost, ctx.metricAttrs)
     }
   }
 
@@ -191,6 +202,12 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
         "session.total_tokens": totals.tokens,
         "session.total_cost_usd": totals.cost,
         "session.total_messages": totals.messages,
+      })
+    }
+    if (diff) {
+      sessionSpan.setAttributes({
+        "session.total_lines_added": diff.additions,
+        "session.total_lines_removed": diff.deletions,
       })
     }
     sessionSpan.setStatus({ code: SpanStatusCode.OK })
@@ -208,6 +225,12 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
         "session.total_tokens": totals.tokens,
         "session.total_cost_usd": totals.cost,
         "session.total_messages": totals.messages,
+      })
+    }
+    if (diff) {
+      runSpan.setAttributes({
+        "session.total_lines_added": diff.additions,
+        "session.total_lines_removed": diff.deletions,
       })
     }
     runSpan.setStatus({ code: SpanStatusCode.OK })
@@ -244,16 +267,24 @@ export function handleSessionError(e: EventSessionError, ctx: HandlerContext) {
   const error = errorSummary(e.properties.error)
   const { agentName, agentType } = rawID ? getSessionAgentMeta(rawID, ctx) : { agentName: "unknown", agentType: "unknown" as const }
   const totals = rawID ? ctx.sessionTotals.get(rawID) : undefined
+  const diff = rawID ? ctx.sessionDiffTotals.get(rawID) : undefined
   if (rawID) {
     ctx.sessionTotals.delete(rawID)
     ctx.sessionDiffTotals.delete(rawID)
   }
+  recordSessionLines(diff, ctx)
   sweepSession(sessionID, ctx)
 
   if (rawID) {
     const sessionSpan = ctx.sessionSpans.get(rawID)
     if (sessionSpan) {
       if (totals) sessionSpan.setAttributes({ [AGENT_NAME]: totals.agent, "agent.type": totals.agentType })
+      if (diff) {
+        sessionSpan.setAttributes({
+          "session.total_lines_added": diff.additions,
+          "session.total_lines_removed": diff.deletions,
+        })
+      }
       sessionSpan.setStatus({ code: SpanStatusCode.ERROR, message: error })
       sessionSpan.setAttribute("error", error)
       sessionSpan.end()
@@ -264,6 +295,12 @@ export function handleSessionError(e: EventSessionError, ctx: HandlerContext) {
     const runSpan = runID ? ctx.runSpans.get(runID) : undefined
     if (runSpan) {
       if (totals) runSpan.setAttributes({ [AGENT_NAME]: totals.agent, "agent.type": totals.agentType })
+      if (diff) {
+        runSpan.setAttributes({
+          "session.total_lines_added": diff.additions,
+          "session.total_lines_removed": diff.deletions,
+        })
+      }
       runSpan.setStatus({ code: SpanStatusCode.ERROR, message: error })
       runSpan.setAttribute("error", error)
       runSpan.end()
@@ -288,13 +325,40 @@ export function handleSessionError(e: EventSessionError, ctx: HandlerContext) {
   ctx.log("error", "otel: session.error", { sessionID, error })
 }
 
+/** Records the session's net lines once the session ends, ends any lingering spans, and clears all per-session state. */
+export function handleSessionDeleted(e: EventSessionDeleted, ctx: HandlerContext) {
+  const sessionID = e.properties.info.id
+  recordSessionLines(ctx.sessionDiffTotals.get(sessionID), ctx)
+  ctx.sessionDiffTotals.delete(sessionID)
+  ctx.sessionTotals.delete(sessionID)
+
+  const sessionSpan = ctx.sessionSpans.get(sessionID)
+  if (sessionSpan) {
+    sessionSpan.setStatus({ code: SpanStatusCode.OK })
+    sessionSpan.end()
+    ctx.sessionSpans.delete(sessionID)
+  }
+  const runID = ctx.activeRuns.get(sessionID)
+  if (runID) {
+    const runSpan = ctx.runSpans.get(runID)
+    if (runSpan) {
+      runSpan.setStatus({ code: SpanStatusCode.OK })
+      runSpan.end()
+    }
+    ctx.runSpans.delete(runID)
+    ctx.activeRuns.delete(sessionID)
+  }
+  sweepSession(sessionID, ctx)
+  ctx.log("debug", "otel: session.deleted", { sessionID })
+}
+
 /** Increments the retry counter when the session enters a retry state. */
 export function handleSessionStatus(e: EventSessionStatus, ctx: HandlerContext) {
   if (e.properties.status.type !== "retry") return
   const { sessionID, status } = e.properties
   const { attempt, message: retryMessage } = status
   if (isMetricEnabled("retry.count", ctx)) {
-    ctx.instruments.retryCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID })
+    ctx.instruments.retryCounter.add(1, ctx.metricAttrs)
     ctx.log("debug", "otel: retry counter incremented", { sessionID, attempt, retryMessage })
   }
 }

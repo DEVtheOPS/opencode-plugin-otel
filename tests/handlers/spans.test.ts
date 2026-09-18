@@ -182,6 +182,57 @@ describe("session spans", () => {
     expect(span.attributes["agent.type"]).toBe("primary")
   })
 
+  test("sets net LOC attributes on the run span before ending on idle", () => {
+    const { ctx, tracer } = makeCtx()
+    handleRunStarted("user_1", "ses_1", "build", "prompt", "anthropic/claude", 1000, ctx)
+    ctx.sessionDiffTotals.set("ses_1", { additions: 12, deletions: 4 })
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    const span = tracer.spans[0]!
+    expect(span.attributes["session.total_lines_added"]).toBe(12)
+    expect(span.attributes["session.total_lines_removed"]).toBe(4)
+  })
+
+  test("sets net LOC attributes on the subagent session span on idle", () => {
+    const { ctx, tracer } = makeCtx()
+    handleRunStarted("user_parent", "ses_parent", "build", "prompt", "anthropic/claude", 900, ctx)
+    handleSessionCreated(makeSessionCreated("ses_1", 1000, "ses_parent"), ctx)
+    ctx.sessionDiffTotals.set("ses_1", { additions: 7, deletions: 2 })
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    const span = tracer.spans[1]!
+    expect(span.attributes["session.total_lines_added"]).toBe(7)
+    expect(span.attributes["session.total_lines_removed"]).toBe(2)
+  })
+
+  test("omits LOC attributes when the session saw no diff", () => {
+    const { ctx, tracer } = makeCtx()
+    handleRunStarted("user_1", "ses_1", "build", "prompt", "anthropic/claude", 1000, ctx)
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    const span = tracer.spans[0]!
+    expect(span.attributes["session.total_lines_added"]).toBeUndefined()
+    expect(span.attributes["session.total_lines_removed"]).toBeUndefined()
+  })
+
+  test("sets LOC span attributes even when the LOC metric is disabled", () => {
+    const { ctx, tracer } = makeCtx("proj_test", ["session.lines_of_code.total"])
+    handleRunStarted("user_1", "ses_1", "build", "prompt", "anthropic/claude", 1000, ctx)
+    ctx.sessionDiffTotals.set("ses_1", { additions: 5, deletions: 1 })
+    handleSessionIdle(makeSessionIdle("ses_1"), ctx)
+    const span = tracer.spans[0]!
+    expect(span.attributes["session.total_lines_added"]).toBe(5)
+    expect(span.attributes["session.total_lines_removed"]).toBe(1)
+  })
+
+  test("sets net LOC attributes on the run span on session.error", () => {
+    const { ctx, tracer } = makeCtx()
+    handleRunStarted("user_1", "ses_1", "build", "prompt", "anthropic/claude", 1000, ctx)
+    ctx.sessionDiffTotals.set("ses_1", { additions: 9, deletions: 3 })
+    handleSessionError(makeSessionError("ses_1", { name: "NetworkError" }), ctx)
+    const span = tracer.spans[0]!
+    expect(span.attributes["session.total_lines_added"]).toBe(9)
+    expect(span.attributes["session.total_lines_removed"]).toBe(3)
+    expect(span.status.code).toBe(SpanStatusCode.ERROR)
+  })
+
   test("ends run span with ERROR status on session.error", () => {
     const { ctx, tracer } = makeCtx()
     handleRunStarted("user_1", "ses_1", "build", "prompt", "anthropic/claude", 1000, ctx)

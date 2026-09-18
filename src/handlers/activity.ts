@@ -4,19 +4,18 @@ import { agentAttrs, getSessionAgentMeta, isMetricEnabled, setBoundedMap } from 
 import type { HandlerContext } from "../types.ts"
 
 /**
- * Records lines-added/removed for a `session.diff` event. opencode publishes each event
- * with the cumulative session diff (first snapshot → latest), so we emit two instruments:
- * `opencode.lines_of_code.count` (Counter) receives only the *positive* per-event delta
- * for each dimension (additions, deletions). Negative deltas — opencode reporting a smaller
- * cumulative for a dimension than the previous event — are dropped, so the counter reports
- * gross positive churn and does not reconcile to net after any revert (full or partial).
- * `opencode.lines_of_code.total` (Gauge) mirrors opencode's current cumulative value on
- * every event and is the authoritative live view.
+ * Records gross positive line churn for a `session.diff` event. opencode publishes each event
+ * with the cumulative session diff (first snapshot → latest), so `opencode.lines_of_code.count`
+ * (Counter) receives only the *positive* per-event delta for each dimension (additions,
+ * deletions). Negative deltas — opencode reporting a smaller cumulative for a dimension than
+ * the previous event — are dropped, so the counter reports gross positive churn and does not
+ * reconcile to net after any revert (full or partial). The cumulative totals are still tracked
+ * in `sessionDiffTotals` and reported as net per-session values by
+ * `opencode.session.lines_of_code.total` on `session.idle`.
  */
 export function handleSessionDiff(e: EventSessionDiff, ctx: HandlerContext) {
   const sessionID = e.properties.sessionID
   const linesEnabled = isMetricEnabled("lines_of_code.count", ctx)
-  const totalEnabled = isMetricEnabled("lines_of_code.total", ctx)
   let totalAdded = 0
   let totalRemoved = 0
   for (const fileDiff of e.properties.diff) {
@@ -30,19 +29,13 @@ export function handleSessionDiff(e: EventSessionDiff, ctx: HandlerContext) {
   const nextTotals = { additions: totalAdded, deletions: totalRemoved }
   setBoundedMap(ctx.sessionDiffTotals, sessionID, nextTotals)
 
-  const baseAttrs = { ...ctx.commonAttrs, "session.id": sessionID }
-
   if (linesEnabled) {
     if (deltaAdded > 0) {
-      ctx.instruments.linesCounter.add(deltaAdded, { ...baseAttrs, type: "added" })
+      ctx.instruments.linesCounter.add(deltaAdded, { ...ctx.metricAttrs, type: "added" })
     }
     if (deltaRemoved > 0) {
-      ctx.instruments.linesCounter.add(deltaRemoved, { ...baseAttrs, type: "removed" })
+      ctx.instruments.linesCounter.add(deltaRemoved, { ...ctx.metricAttrs, type: "removed" })
     }
-  }
-  if (totalEnabled) {
-    ctx.instruments.linesTotalGauge.record(totalAdded, { ...baseAttrs, type: "added" })
-    ctx.instruments.linesTotalGauge.record(totalRemoved, { ...baseAttrs, type: "removed" })
   }
 
   ctx.log("debug", "otel: lines_of_code metrics updated", {
@@ -65,10 +58,7 @@ export function handleCommandExecuted(e: EventCommandExecuted, ctx: HandlerConte
   const { agentName, agentType } = getSessionAgentMeta(e.properties.sessionID, ctx)
 
   if (isMetricEnabled("commit.count", ctx)) {
-    ctx.instruments.commitCounter.add(1, {
-      ...ctx.commonAttrs,
-      "session.id": e.properties.sessionID,
-    })
+    ctx.instruments.commitCounter.add(1, ctx.metricAttrs)
     ctx.log("debug", "otel: commit counter incremented", { sessionID: e.properties.sessionID })
   }
   ctx.emitLog({

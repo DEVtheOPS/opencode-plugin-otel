@@ -1,4 +1,4 @@
-import type { Context, Counter, Gauge, Histogram, Span, SpanContext, Tracer } from "@opentelemetry/api"
+import type { Context, Counter, Histogram, Span, SpanContext, Tracer } from "@opentelemetry/api"
 import type { LogRecord } from "@opentelemetry/api-logs"
 
 /** Numeric priority map for log levels; higher value = higher severity. */
@@ -41,7 +41,7 @@ export type Instruments = {
   tokenCounter: Counter
   costCounter: Counter
   linesCounter: Counter
-  linesTotalGauge: Gauge
+  sessionLinesTotal: Histogram
   commitCounter: Counter
   toolDurationHistogram: Histogram
   cacheCounter: Counter
@@ -57,7 +57,7 @@ export type Instruments = {
 /** Session role emitted by opencode: either the primary/root agent or a spawned subagent. */
 export type SessionAgentType = "primary" | "subagent"
 
-/** Accumulated per-session totals used for gauge snapshots on session.idle. */
+/** Accumulated per-session totals used for histogram snapshots on session.idle. */
 export type SessionTotals = {
   startMs: number
   tokens: number
@@ -89,7 +89,14 @@ export type HandlerContext = {
   log: PluginLogger
   emitLog: (record: LogRecord) => void
   instruments: Instruments
+  /** Attributes for emitted spans and log events: the configured span attributes plus `project.id`. */
   commonAttrs: CommonAttrs
+  /**
+   * Attributes for metric data points: the configured span attributes only. Identifiers that are
+   * useful for drill-down but unbounded as Prometheus labels — `project.id`, `session.id` — belong
+   * on spans and log events, never here.
+   */
+  metricAttrs: CommonAttrs
   pendingToolSpans: Map<string, PendingToolSpan>
   pendingPermissions: Map<string, PendingPermission>
   sessionTotals: Map<string, SessionTotals>
