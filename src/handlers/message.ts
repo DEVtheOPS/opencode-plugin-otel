@@ -28,6 +28,12 @@ import {
   TOOL_PARAMETERS,
 } from "@arizeai/openinference-semantic-conventions"
 import {
+  ATTR_GEN_AI_REQUEST_MODEL,
+  ATTR_GEN_AI_RESPONSE_MODEL,
+  ATTR_GEN_AI_USAGE_INPUT_TOKENS,
+  ATTR_GEN_AI_USAGE_OUTPUT_TOKENS,
+} from "@opentelemetry/semantic-conventions/incubating"
+import {
   agentAttrs,
   errorSummary,
   genAiProviderName,
@@ -42,6 +48,11 @@ import type { HandlerContext } from "../types.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 const LLM_FINISH_REASON = "llm.finish_reason"
+// Spelled out rather than taken from semconv: the incubating constants emit
+// `gen_ai.usage.cache_read.input_tokens`, while Anthropic's API and every GenAI
+// consumer we target read the underscored form below.
+const ATTR_GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS = "gen_ai.usage.cache_read_input_tokens"
+const ATTR_GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS = "gen_ai.usage.cache_creation_input_tokens"
 
 type SubtaskPart = {
   type: "subtask"
@@ -130,6 +141,11 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
       [LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ]: assistant.tokens.cache.read,
       [LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE]: assistant.tokens.cache.write,
       [LLM_TOKEN_COUNT_TOTAL]: totalTokens,
+      [ATTR_GEN_AI_RESPONSE_MODEL]: modelID,
+      [ATTR_GEN_AI_USAGE_INPUT_TOKENS]: assistant.tokens.input,
+      [ATTR_GEN_AI_USAGE_OUTPUT_TOKENS]: assistant.tokens.output,
+      [ATTR_GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS]: assistant.tokens.cache.read,
+      [ATTR_GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS]: assistant.tokens.cache.write,
       [LLM_FINISH_REASON]: assistant.error ? "error" : (assistant.finish ?? "stop"),
       [LLM_COST_TOTAL]: assistant.cost,
       ...(outputText
@@ -454,6 +470,7 @@ export function startMessageSpan(
         [LLM_PROVIDER]: providerID,
         "gen_ai.provider.name": genAiProviderName(providerID),
         [LLM_MODEL_NAME]: modelID,
+        [ATTR_GEN_AI_REQUEST_MODEL]: modelID,
         ...(inputText
           ? {
               [INPUT_VALUE]: inputText,
