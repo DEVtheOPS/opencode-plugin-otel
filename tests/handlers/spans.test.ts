@@ -370,6 +370,16 @@ describe("message (LLM) spans", () => {
     expect(tracer.spans[0]!.attributes[LLM_MODEL_NAME]).toBe("claude-sonnet-4")
   })
 
+  // Asserted as literal keys, not via the semconv constants the source imports:
+  // these strings are the wire format Gen AI consumers match on, so the test has
+  // to fail if a constant is renamed upstream.
+  test("startMessageSpan sets OTel GenAI model attribute", () => {
+    const { ctx, tracer } = makeCtx()
+    startMessageSpan("ses_1", "msg_1", "user_1", "claude-sonnet-4", "amazon-bedrock", 1000, ctx)
+    expect(tracer.spans[0]!.attributes["gen_ai.request.model"]).toBe("claude-sonnet-4")
+    expect(tracer.spans[0]!.attributes["gen_ai.provider.name"]).toBe("aws.bedrock")
+  })
+
   test("startMessageSpan is a no-op when span already exists for sessionID:messageID", () => {
     const { ctx, tracer } = makeCtx()
     startMessageSpan("ses_1", "msg_1", "user_1", "claude", "anthropic", 1000, ctx)
@@ -432,6 +442,44 @@ describe("message (LLM) spans", () => {
     expect(span.attributes[LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE]).toBe(5)
     expect(span.attributes[AGENT_NAME]).toBe("review")
     expect(span.attributes["agent.type"]).toBe("subagent")
+  })
+
+  test("handleMessageUpdated sets OTel GenAI token attributes on span", () => {
+    const { ctx, tracer } = makeCtx()
+    startMessageSpan("ses_1", "msg_1", "user_1", "claude-3-5-sonnet", "anthropic", 1000, ctx)
+    handleMessageUpdated(
+      makeAssistantMessageUpdated({
+        id: "msg_1",
+        modelID: "claude-3-5-sonnet",
+        tokens: { input: 200, output: 80, reasoning: 10, cache: { read: 30, write: 5 } },
+      }),
+      ctx,
+    )
+    const span = tracer.spans[0]!
+    expect(span.attributes["gen_ai.response.model"]).toBe("claude-3-5-sonnet")
+    expect(span.attributes["gen_ai.usage.input_tokens"]).toBe(200)
+    expect(span.attributes["gen_ai.usage.output_tokens"]).toBe(80)
+    // Underscored, matching Anthropic's API and Gen AI consumers. The semconv
+    // constants spell these with a dot (gen_ai.usage.cache_read.input_tokens).
+    expect(span.attributes["gen_ai.usage.cache_read_input_tokens"]).toBe(30)
+    expect(span.attributes["gen_ai.usage.cache_creation_input_tokens"]).toBe(5)
+  })
+
+  test("GenAI token attributes do not displace the OpenInference ones", () => {
+    const { ctx, tracer } = makeCtx()
+    startMessageSpan("ses_1", "msg_1", "user_1", "claude-3-5-sonnet", "anthropic", 1000, ctx)
+    handleMessageUpdated(
+      makeAssistantMessageUpdated({
+        id: "msg_1",
+        tokens: { input: 200, output: 80, reasoning: 10, cache: { read: 30, write: 5 } },
+      }),
+      ctx,
+    )
+    const span = tracer.spans[0]!
+    expect(span.attributes[LLM_TOKEN_COUNT_PROMPT]).toBe(200)
+    expect(span.attributes["gen_ai.usage.input_tokens"]).toBe(200)
+    expect(span.attributes[LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE]).toBe(5)
+    expect(span.attributes["gen_ai.usage.cache_creation_input_tokens"]).toBe(5)
   })
 
   test("handleMessageUpdated no-ops span handling when no span exists for messageID", () => {
