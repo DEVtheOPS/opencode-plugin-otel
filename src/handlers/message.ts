@@ -27,6 +27,7 @@ import {
   TOOL_NAME,
   TOOL_PARAMETERS,
 } from "@arizeai/openinference-semantic-conventions"
+import { ATTR_GEN_AI_AGENT_NAME } from "@opentelemetry/semantic-conventions/incubating"
 import {
   agentAttrs,
   errorSummary,
@@ -123,6 +124,7 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
     const outputText = ctx.messageOutputs.get(msgKey)
     msgSpan.setAttributes({
       [AGENT_NAME]: agentName,
+      [ATTR_GEN_AI_AGENT_NAME]: agentName,
       "agent.type": agentType,
       [LLM_TOKEN_COUNT_PROMPT]: assistant.tokens.input,
       [LLM_TOKEN_COUNT_COMPLETION]: assistant.tokens.output,
@@ -449,6 +451,7 @@ export function startMessageSpan(
         [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.LLM,
         [SESSION_ID]: sessionID,
         [AGENT_NAME]: agentName,
+        [ATTR_GEN_AI_AGENT_NAME]: agentName,
         "agent.type": agentType,
         [LLM_SYSTEM]: providerID,
         [LLM_PROVIDER]: providerID,

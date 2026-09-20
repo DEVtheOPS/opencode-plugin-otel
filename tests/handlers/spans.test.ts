@@ -370,6 +370,15 @@ describe("message (LLM) spans", () => {
     expect(tracer.spans[0]!.attributes[LLM_MODEL_NAME]).toBe("claude-sonnet-4")
   })
 
+  // Asserted as a literal key, not via the semconv constant the source imports:
+  // this string is the wire format Gen AI consumers match on, so the test has to
+  // fail if the constant is renamed upstream.
+  test("startMessageSpan mirrors the agent name onto gen_ai.agent.name", () => {
+    const { ctx, tracer } = makeCtx()
+    startMessageSpan("ses_1", "msg_1", "user_1", "claude-sonnet-4", "anthropic", 1000, ctx, "plan")
+    expect(tracer.spans[0]!.attributes["gen_ai.agent.name"]).toBe(tracer.spans[0]!.attributes[AGENT_NAME])
+  })
+
   test("startMessageSpan is a no-op when span already exists for sessionID:messageID", () => {
     const { ctx, tracer } = makeCtx()
     startMessageSpan("ses_1", "msg_1", "user_1", "claude", "anthropic", 1000, ctx)
@@ -432,6 +441,17 @@ describe("message (LLM) spans", () => {
     expect(span.attributes[LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE]).toBe(5)
     expect(span.attributes[AGENT_NAME]).toBe("review")
     expect(span.attributes["agent.type"]).toBe("subagent")
+  })
+
+  test("handleMessageUpdated mirrors the agent name onto gen_ai.agent.name", () => {
+    const { ctx, tracer } = makeCtx()
+    startMessageSpan("ses_1", "msg_1", "user_1", "claude-3-5-sonnet", "anthropic", 1000, ctx)
+    ctx.sessionTotals.set("ses_1", { startMs: 0, tokens: 0, cost: 0, messages: 0, agent: "review", agentType: "subagent" })
+    handleMessageUpdated(makeAssistantMessageUpdated({ id: "msg_1" }), ctx)
+    const span = tracer.spans[0]!
+    expect(span.attributes["gen_ai.agent.name"]).toBe("review")
+    // the OpenInference key is mirrored, never replaced
+    expect(span.attributes[AGENT_NAME]).toBe("review")
   })
 
   test("handleMessageUpdated no-ops span handling when no span exists for messageID", () => {
