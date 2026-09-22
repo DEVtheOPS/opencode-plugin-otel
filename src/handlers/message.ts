@@ -37,6 +37,7 @@ import {
   isMetricEnabled,
   isTraceEnabled,
   resolveSessionTraceContext,
+  traceContentAttrs,
 } from "../util.ts"
 import type { HandlerContext } from "../types.ts"
 
@@ -133,11 +134,11 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
       [LLM_FINISH_REASON]: assistant.error ? "error" : (assistant.finish ?? "stop"),
       [LLM_COST_TOTAL]: assistant.cost,
       ...(outputText
-        ? {
-            [OUTPUT_VALUE]: outputText,
-            [OUTPUT_MIME_TYPE]: MimeType.TEXT,
-            [LLM_OUTPUT_MESSAGES]: JSON.stringify([{ role: "assistant", content: outputText }]),
-          }
+        ? traceContentAttrs(ctx, {
+          [OUTPUT_VALUE]: outputText,
+          [OUTPUT_MIME_TYPE]: MimeType.TEXT,
+          [LLM_OUTPUT_MESSAGES]: JSON.stringify([{ role: "assistant", content: outputText }]),
+        })
         : {}),
       cost_usd: assistant.cost,
       duration_ms: duration,
@@ -235,6 +236,7 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
   const part = e.properties.part
 
   if (part.type === "text") {
+    if (!ctx.captureContentInTraces) return
     const key = `${part.sessionID}:${part.messageID}`
     ctx.messageOutputs.set(key, `${ctx.messageOutputs.get(key) ?? ""}${part.text}`)
     return
@@ -290,9 +292,11 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
                   [SESSION_ID]: toolPart.sessionID,
                   [TOOL_ID]: toolPart.callID,
                   [TOOL_NAME]: toolPart.tool,
-                  [TOOL_PARAMETERS]: JSON.stringify(toolPart.state.input),
-                  [INPUT_VALUE]: JSON.stringify(toolPart.state.input),
-                  [INPUT_MIME_TYPE]: MimeType.JSON,
+                  ...traceContentAttrs(ctx, {
+                    [TOOL_PARAMETERS]: JSON.stringify(toolPart.state.input),
+                    [INPUT_VALUE]: JSON.stringify(toolPart.state.input),
+                    [INPUT_MIME_TYPE]: MimeType.JSON,
+                  }),
                   [AGENT_NAME]: agentName,
                   "agent.type": agentType,
                   ...ctx.commonAttrs,
@@ -346,9 +350,11 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
               [SESSION_ID]: toolPart.sessionID,
               [TOOL_ID]: toolPart.callID,
               [TOOL_NAME]: toolPart.tool,
-              [TOOL_PARAMETERS]: JSON.stringify(toolPart.state.input),
-              [INPUT_VALUE]: JSON.stringify(toolPart.state.input),
-              [INPUT_MIME_TYPE]: MimeType.JSON,
+              ...traceContentAttrs(ctx, {
+                [TOOL_PARAMETERS]: JSON.stringify(toolPart.state.input),
+                [INPUT_VALUE]: JSON.stringify(toolPart.state.input),
+                [INPUT_MIME_TYPE]: MimeType.JSON,
+              }),
               ...ctx.commonAttrs,
             },
           },
@@ -361,20 +367,23 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
       toolSpan.setAttribute("tool.success", success)
       if (success) {
         const output = (toolPart.state as { output: string }).output
-        toolSpan.setAttributes({
+        toolSpan.setAttributes(traceContentAttrs(ctx, {
           [OUTPUT_VALUE]: output,
           [OUTPUT_MIME_TYPE]: MimeType.TEXT,
-        })
+        }))
         toolSpan.setAttribute("tool.result_size_bytes", Buffer.byteLength(output, "utf8"))
         toolSpan.setStatus({ code: SpanStatusCode.OK })
       } else {
         const err = (toolPart.state as { error: string }).error
-        toolSpan.setAttributes({
+        toolSpan.setAttributes(traceContentAttrs(ctx, {
           [OUTPUT_VALUE]: err,
           [OUTPUT_MIME_TYPE]: MimeType.TEXT,
+          "tool.error": err,
+        }))
+        toolSpan.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: ctx.captureContentInTraces ? err : "tool failed",
         })
-        toolSpan.setAttribute("tool.error", err)
-        toolSpan.setStatus({ code: SpanStatusCode.ERROR, message: err })
       }
       toolSpan.end(end)
     }
@@ -454,12 +463,12 @@ export function startMessageSpan(
         [LLM_PROVIDER]: providerID,
         "gen_ai.provider.name": genAiProviderName(providerID),
         [LLM_MODEL_NAME]: modelID,
-        ...(inputText
+        ...traceContentAttrs(ctx, inputText
           ? {
-              [INPUT_VALUE]: inputText,
-              [INPUT_MIME_TYPE]: MimeType.TEXT,
-              [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: inputText }]),
-            }
+            [INPUT_VALUE]: inputText,
+            [INPUT_MIME_TYPE]: MimeType.TEXT,
+            [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: inputText }]),
+          }
           : {}),
         ...ctx.commonAttrs,
       },

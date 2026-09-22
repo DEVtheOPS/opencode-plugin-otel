@@ -100,7 +100,8 @@ The environment variables (set them in your shell profile — `~/.zshrc`, `~/.ba
 | `OPENCODE_METRIC_PREFIX` | `opencode.` | Prefix for all metric names (e.g. set to `claude_code.` for Claude Code dashboard compatibility) |
 | `OPENCODE_DISABLE_METRICS` | *(unset)* | Comma-separated list of metric name suffixes to disable (e.g. `cache.count,session.duration`) |
 | `OPENCODE_DISABLE_LOGS` | *(unset)* | Set to any non-empty value to suppress all OTLP log events while leaving metrics and traces unchanged |
-| `OPENCODE_CAPTURE_PROMPT_IN_LOGS` | *(unset)* | Set to any non-empty value to include the full prompt text in the `prompt` attribute of `user_prompt` log events. **Log events only** — trace spans always carry the prompt in `input.value` regardless of this flag (disable span-level capture separately via `OPENCODE_DISABLE_TRACES`). **Off by default — prompts may contain secrets or PII; enable only for trusted collectors.** |
+| `OPENCODE_CAPTURE_PROMPT_IN_LOGS` | *(unset)* | Set to any non-empty value to include the full prompt text in the `prompt` attribute of `user_prompt` log events. **Log events only.** Off by default. |
+| `OPENCODE_DISABLE_TRACE_CONTENT` | *(unset)* | Set to any non-empty value to omit prompts, completions, and tool payloads from **trace spans** (`input.value`, `output.value`, `llm.input_messages`, `llm.output_messages`, `tool.parameters`). Spans, metrics, and token/cost attributes are still exported. Content capture on traces is **on by default**. |
 | `OPENCODE_DISABLE_TRACES` | *(unset)* | Comma-separated list of trace types to disable (`session`, `llm`, `tool`). Use `all`, `*`, `true`, or `1` to disable every trace type |
 | `OPENCODE_OTLP_HEADERS` | *(unset)* | Comma-separated `key=value` headers added to all OTLP exports. **Keep out of version control — may contain sensitive auth tokens.** |
 | `OPENCODE_OTLP_HEADERS_HELPER` | *(unset)* | Executable script/binary that returns dynamic OTLP headers as JSON after an auth failure. Helper headers override `OPENCODE_OTLP_HEADERS`. |
@@ -112,6 +113,8 @@ The environment variables (set them in your shell profile — `~/.zshrc`, `~/.ba
 | `OPENCODE_TRACE_PROPAGATION_PROVIDERS` | *(unset)* | Comma-separated opencode provider IDs that receive W3C `traceparent` and `tracestate` headers on LLM requests. Use `*` to explicitly enable every provider. |
 
 Prompt logging remains disabled by default. Enable it only when the configured telemetry destination is trusted to receive potentially sensitive prompt contents.
+
+Trace spans capture prompts, completions, and tool payloads by default. Set `OPENCODE_DISABLE_TRACE_CONTENT=1` (or `"captureContentInTraces": false` in plugin options) to keep traces without that content.
 
 ### Plugin options (opencode.json)
 
@@ -140,6 +143,7 @@ Option keys mirror the resolved config and map to the environment variables:
 | `enabled` | `OPENCODE_ENABLE_TELEMETRY` |
 | `logsEnabled` | `OPENCODE_DISABLE_LOGS` (inverted) |
 | `capturePromptInLogs` | `OPENCODE_CAPTURE_PROMPT_IN_LOGS` |
+| `captureContentInTraces` | `OPENCODE_DISABLE_TRACE_CONTENT` (inverted) |
 | `endpoint` | `OPENCODE_OTLP_ENDPOINT` |
 | `protocol` | `OPENCODE_OTLP_PROTOCOL` |
 | `metricsInterval` | `OPENCODE_OTLP_METRICS_INTERVAL` |
@@ -289,6 +293,16 @@ export OPENCODE_DISABLE_TRACES="all"
 ```
 
 Accepted explicit "disable all traces" values are `all`, `*`, `true`, and `1`.
+
+### Disabling trace content (prompts, completions, tool payloads)
+
+Use `OPENCODE_DISABLE_TRACE_CONTENT` to keep session/llm/tool spans while omitting OpenInference payload attributes. Token counts, cost, duration, model, and tool name still appear.
+
+```bash
+export OPENCODE_DISABLE_TRACE_CONTENT=1
+```
+
+This does not change OTLP logs. `OPENCODE_CAPTURE_PROMPT_IN_LOGS` remains a separate opt-in for the `user_prompt` log event.
 
 ### SigNoz example
 

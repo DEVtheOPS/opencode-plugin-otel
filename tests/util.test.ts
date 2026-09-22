@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test"
-import { errorSummary, genAiProviderName, setBoundedMap, isMetricEnabled, isTraceEnabled } from "../src/util.ts"
+import { errorSummary, genAiProviderName, setBoundedMap, isMetricEnabled, isTraceEnabled, isTraceContentEnabled, traceContentAttrs } from "../src/util.ts"
 import { MAX_PENDING } from "../src/types.ts"
 
 describe("errorSummary", () => {
@@ -146,5 +146,17 @@ describe("isTraceEnabled", () => {
 
   test("unknown trace names in disabled set do not affect known types", () => {
     expect(isTraceEnabled("llm", { disabledTraces: new Set(["does_not_exist"]) })).toBe(true)
+  })
+})
+
+describe("trace content capture", () => {
+  test("isTraceContentEnabled follows the context flag", () => {
+    expect(isTraceContentEnabled({ captureContentInTraces: true })).toBe(true)
+    expect(isTraceContentEnabled({ captureContentInTraces: false })).toBe(false)
+  })
+
+  test("traceContentAttrs returns attrs only when capture is enabled", () => {
+    expect(traceContentAttrs({ captureContentInTraces: true }, { "input.value": "secret" })).toEqual({ "input.value": "secret" })
+    expect(traceContentAttrs({ captureContentInTraces: false }, { "input.value": "secret" })).toEqual({})
   })
 })
