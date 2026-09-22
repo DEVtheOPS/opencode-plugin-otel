@@ -1,5 +1,5 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
-import { SpanStatusCode, SpanKind } from "@opentelemetry/api"
+import { SpanStatusCode, SpanKind, type Span } from "@opentelemetry/api"
 import type { AssistantMessage, EventMessageUpdated, EventMessagePartUpdated, ToolPart } from "@opencode-ai/sdk"
 import {
   AGENT_NAME,
@@ -29,6 +29,7 @@ import {
 } from "@arizeai/openinference-semantic-conventions"
 import {
   agentAttrs,
+  contextForSpanContext,
   errorSummary,
   genAiProviderName,
   setBoundedMap,
@@ -119,6 +120,7 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
 
   const msgKey = `${sessionID}:${assistant.id}`
   const msgSpan = ctx.messageSpans.get(msgKey)
+  const msgSpanContext = msgSpan?.spanContext()
   if (msgSpan) {
     const outputText = ctx.messageOutputs.get(msgKey)
     msgSpan.setAttributes({
@@ -166,6 +168,7 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
       timestamp: assistant.time.created,
       observedTimestamp: Date.now(),
       body: "api_error",
+      context: contextForSpanContext(msgSpanContext, ctx),
       attributes: {
         "event.name": "api_error",
         "session.id": sessionID,
@@ -193,6 +196,7 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
     timestamp: assistant.time.created,
     observedTimestamp: Date.now(),
     body: "api_request",
+    context: contextForSpanContext(msgSpanContext, ctx),
     attributes: {
       "event.name": "api_request",
         "session.id": sessionID,
@@ -334,29 +338,28 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
       })
     }
 
+    let toolSpan: Span | undefined
     if (isTraceEnabled("tool", ctx)) {
-      const toolSpan = pending?.span ?? (() => {
-        return ctx.tracer.startSpan(
-          `${ctx.tracePrefix}tool.${toolPart.tool}`,
-          {
-            startTime: start,
-            kind: SpanKind.INTERNAL,
-            attributes: {
-              [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.TOOL,
-              [SESSION_ID]: toolPart.sessionID,
-              [TOOL_ID]: toolPart.callID,
-              [TOOL_NAME]: toolPart.tool,
-              [TOOL_PARAMETERS]: JSON.stringify(toolPart.state.input),
-              [INPUT_VALUE]: JSON.stringify(toolPart.state.input),
-              [INPUT_MIME_TYPE]: MimeType.JSON,
-              ...ctx.commonAttrs,
-            },
+      toolSpan = pending?.span ?? ctx.tracer.startSpan(
+        `${ctx.tracePrefix}tool.${toolPart.tool}`,
+        {
+          startTime: start,
+          kind: SpanKind.INTERNAL,
+          attributes: {
+            [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.TOOL,
+            [SESSION_ID]: toolPart.sessionID,
+            [TOOL_ID]: toolPart.callID,
+            [TOOL_NAME]: toolPart.tool,
+            [TOOL_PARAMETERS]: JSON.stringify(toolPart.state.input),
+            [INPUT_VALUE]: JSON.stringify(toolPart.state.input),
+            [INPUT_MIME_TYPE]: MimeType.JSON,
+            ...ctx.commonAttrs,
           },
-          resolveSessionTraceContext(toolPart.sessionID, ctx, {
-            assistantMessageID: toolPart.messageID,
-          }),
-        )
-      })()
+        },
+        resolveSessionTraceContext(toolPart.sessionID, ctx, {
+          assistantMessageID: toolPart.messageID,
+        }),
+      )
       toolSpan.setAttributes({ [AGENT_NAME]: agentName, "agent.type": agentType })
       toolSpan.setAttribute("tool.success", success)
       if (success) {
@@ -389,6 +392,7 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
       timestamp: start,
       observedTimestamp: Date.now(),
       body: "tool_result",
+      context: contextForSpanContext(toolSpan?.spanContext(), ctx),
       attributes: {
         "event.name": "tool_result",
         "session.id": toolPart.sessionID,

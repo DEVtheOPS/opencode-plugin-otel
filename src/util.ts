@@ -1,4 +1,5 @@
-import { trace } from "@opentelemetry/api"
+import { trace, type Context, type SpanContext } from "@opentelemetry/api"
+import type { LogRecord } from "@opentelemetry/api-logs"
 import { MAX_PENDING } from "./types.ts"
 import type { HandlerContext, SessionAgentType } from "./types.ts"
 
@@ -66,6 +67,33 @@ export function resolveSessionTraceContext(
   if (assistantRunID) return resolveRunTraceContext(assistantRunID, ctx)
   const activeRunID = ctx.activeRuns.get(sessionID)
   return activeRunID ? resolveRunTraceContext(activeRunID, ctx) : baseCtx
+}
+
+/**
+ * Wraps a span context in an OTel `Context` anchored at the plugin root.
+ * Returns `undefined` when there is no span context, so callers can leave the
+ * log record's `context` unset and fall back to `resolveLogContext`.
+ */
+export function contextForSpanContext(
+  spanContext: SpanContext | undefined,
+  ctx: Pick<HandlerContext, "rootContext">,
+): Context | undefined {
+  return spanContext ? trace.setSpanContext(ctx.rootContext(), spanContext) : undefined
+}
+
+/**
+ * Resolves the OTel `Context` a log record should be correlated with.
+ *
+ * Log records emitted without a context inherit `context.active()`, which is
+ * always empty under opencode's event dispatch — so each record landed as its
+ * own root trace instead of nesting under the session, run, tool, or LLM span
+ * that produced it. An explicit `record.context` wins; otherwise the record is
+ * parented to the session/run context named by its `session.id` attribute.
+ */
+export function resolveLogContext(record: LogRecord, ctx: HandlerContext): Context | undefined {
+  if (record.context) return record.context
+  const sessionID = record.attributes?.["session.id"]
+  return typeof sessionID === "string" ? resolveSessionTraceContext(sessionID, ctx) : undefined
 }
 
 /**

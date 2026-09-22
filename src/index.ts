@@ -26,7 +26,7 @@ import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from
 import { handlePermissionUpdated, handlePermissionReplied } from "./handlers/permission.ts"
 import { handleSessionDiff, handleCommandExecuted } from "./handlers/activity.ts"
 import { handleChatHeaders } from "./handlers/chat-headers.ts"
-import { agentAttrs, getSessionAgentMeta, setBoundedMap } from "./util.ts"
+import { agentAttrs, getSessionAgentMeta, resolveLogContext, setBoundedMap } from "./util.ts"
 import type { SessionTotals } from "./types.ts"
 
 const PLUGIN_VERSION: string = (pkg as { version?: string }).version ?? "unknown"
@@ -94,7 +94,8 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
   const logger = logs.getLogger("com.opencode")
   const emitLog: HandlerContext["emitLog"] = (record) => {
     if (!config.logsEnabled) return
-    logger.emit(record)
+    const context = resolveLogContext(record, ctx)
+    logger.emit(context ? { ...record, context } : record)
   }
   const tracer = trace.getTracer("com.opencode")
   const remoteContext = remoteParentContext(config.traceparent, config.tracestate)
