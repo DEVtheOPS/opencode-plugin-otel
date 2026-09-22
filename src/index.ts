@@ -138,7 +138,14 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
   if (config.capturePromptInLogs) {
     await log(
       "info",
-      "prompt-in-logs capture enabled - full prompt text emitted in the `prompt` attribute of user_prompt log events (spans always carry the prompt regardless)",
+      "prompt-in-logs capture enabled - full prompt text emitted in the `prompt` attribute of user_prompt log events",
+    )
+  }
+
+  if (!config.captureContentInTraces) {
+    await log(
+      "info",
+      "trace content capture disabled - spans omit prompts, completions, and tool payloads",
     )
   }
 
@@ -153,6 +160,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     sessionDiffTotals,
     disabledMetrics,
     disabledTraces,
+    captureContentInTraces: config.captureContentInTraces,
     tracer,
     tracePrefix: config.metricPrefix,
     rootContext,

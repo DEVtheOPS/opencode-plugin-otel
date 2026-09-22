@@ -2,7 +2,10 @@ import { describe, test, expect } from "bun:test"
 import { context, SpanStatusCode, trace, TraceFlags } from "@opentelemetry/api"
 import {
   AGENT_NAME,
+  INPUT_VALUE,
+  LLM_INPUT_MESSAGES,
   LLM_MODEL_NAME,
+  LLM_OUTPUT_MESSAGES,
   LLM_PROVIDER,
   LLM_SYSTEM,
   LLM_TOKEN_COUNT_COMPLETION,
@@ -11,9 +14,11 @@ import {
   LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ,
   LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE,
   OpenInferenceSpanKind,
+  OUTPUT_VALUE,
   SemanticConventions,
   SESSION_ID,
   TOOL_NAME,
+  TOOL_PARAMETERS,
 } from "@arizeai/openinference-semantic-conventions"
 import type { Span } from "@opentelemetry/api"
 import { handleSessionCreated, handleSessionIdle, handleSessionError, handleRunStarted } from "../../src/handlers/session.ts"
@@ -80,19 +85,20 @@ function makeAssistantMessageUpdated(overrides: {
 
 function makeToolPartUpdated(
   status: "running" | "completed" | "error",
-  overrides: { sessionID?: string; messageID?: string; callID?: string; tool?: string; startMs?: number; endMs?: number; output?: string } = {},
+  overrides: { sessionID?: string; messageID?: string; callID?: string; tool?: string; startMs?: number; endMs?: number; output?: string; input?: unknown } = {},
 ): EventMessagePartUpdated {
   const sessionID = overrides.sessionID ?? "ses_1"
   const messageID = overrides.messageID ?? "msg_1"
   const callID = overrides.callID ?? "call_1"
   const start = overrides.startMs ?? 1000
   const end = overrides.endMs ?? 2000
+  const input = overrides.input ?? { command: "echo hi" }
   const state =
     status === "running"
-      ? { status: "running", time: { start } }
+      ? { status: "running", time: { start }, input }
       : status === "completed"
-        ? { status: "completed", time: { start, end }, output: overrides.output ?? "ok" }
-        : { status: "error", time: { start, end }, error: "fail" }
+        ? { status: "completed", time: { start, end }, output: overrides.output ?? "ok", input }
+        : { status: "error", time: { start, end }, error: "fail", input }
   return {
     type: "message.part.updated",
     properties: { part: { type: "tool", sessionID, messageID, callID, tool: overrides.tool ?? "bash", state } },
@@ -631,5 +637,64 @@ describe("OPENCODE_DISABLE_TRACES=tool", () => {
     const { ctx, tracer } = makeCtx("proj_test", [], ["tool"])
     handleSessionCreated(makeSessionCreated("ses_1"), ctx)
     expect(tracer.spans).toHaveLength(0)
+  })
+})
+
+describe("OPENCODE_DISABLE_TRACE_CONTENT", () => {
+  test("run span omits prompt payloads but still records the turn", () => {
+    const { ctx, tracer } = makeCtx()
+    ctx.captureContentInTraces = false
+    handleRunStarted("user_1", "ses_1", "build", "secret prompt", "anthropic/claude", 1000, ctx)
+    expect(tracer.spans).toHaveLength(1)
+    expect(tracer.spans[0]!.name).toBe("opencode.session")
+    expect(tracer.spans[0]!.attributes[AGENT_NAME]).toBe("build")
+    expect(tracer.spans[0]!.attributes[INPUT_VALUE]).toBeUndefined()
+    expect(tracer.spans[0]!.attributes[LLM_INPUT_MESSAGES]).toBeUndefined()
+    expect(ctx.runInputs.has("user_1")).toBe(false)
+  })
+
+  test("llm span omits prompt and completion payloads", () => {
+    const { ctx, tracer } = makeCtx()
+    ctx.captureContentInTraces = false
+    handleRunStarted("user_1", "ses_1", "build", "secret prompt", "anthropic/claude", 1000, ctx)
+    startMessageSpan("ses_1", "msg_1", "user_1", "claude-3-5-sonnet", "anthropic", 1100, ctx)
+    handleMessagePartUpdated({
+      type: "message.part.updated",
+      properties: { part: { type: "text", text: "secret completion", sessionID: "ses_1", messageID: "msg_1" } },
+    } as EventMessagePartUpdated, ctx)
+    handleMessageUpdated(makeAssistantMessageUpdated({ id: "msg_1" }), ctx)
+    const llm = tracer.spans.find(s => s.name === "opencode.llm")!
+    expect(llm.attributes[LLM_MODEL_NAME]).toBe("claude-3-5-sonnet")
+    expect(llm.attributes[INPUT_VALUE]).toBeUndefined()
+    expect(llm.attributes[LLM_INPUT_MESSAGES]).toBeUndefined()
+    expect(llm.attributes[OUTPUT_VALUE]).toBeUndefined()
+    expect(llm.attributes[LLM_OUTPUT_MESSAGES]).toBeUndefined()
+    expect(llm.ended).toBe(true)
+  })
+
+  test("tool span omits args and results but keeps name, success, and size", () => {
+    const { ctx, tracer } = makeCtx()
+    ctx.captureContentInTraces = false
+    handleMessagePartUpdated(makeToolPartUpdated("running", { startMs: 1000, input: { command: "cat secret.env" } }), ctx)
+    handleMessagePartUpdated(makeToolPartUpdated("completed", { output: "secret stdout", endMs: 2000, input: { command: "cat secret.env" } }), ctx)
+    const span = tracer.spans[0]!
+    expect(span.attributes[TOOL_NAME]).toBe("bash")
+    expect(span.attributes[TOOL_PARAMETERS]).toBeUndefined()
+    expect(span.attributes[INPUT_VALUE]).toBeUndefined()
+    expect(span.attributes[OUTPUT_VALUE]).toBeUndefined()
+    expect(span.attributes["tool.success"]).toBe(true)
+    expect(span.attributes["tool.result_size_bytes"]).toBe(Buffer.byteLength("secret stdout", "utf8"))
+    expect(span.status.code).toBe(SpanStatusCode.OK)
+  })
+
+  test("tool error status does not include the error body", () => {
+    const { ctx, tracer } = makeCtx()
+    ctx.captureContentInTraces = false
+    handleMessagePartUpdated(makeToolPartUpdated("running"), ctx)
+    handleMessagePartUpdated(makeToolPartUpdated("error"), ctx)
+    expect(tracer.spans[0]!.attributes[OUTPUT_VALUE]).toBeUndefined()
+    expect(tracer.spans[0]!.attributes["tool.error"]).toBeUndefined()
+    expect(tracer.spans[0]!.status.code).toBe(SpanStatusCode.ERROR)
+    expect(tracer.spans[0]!.status.message).toBe("tool failed")
   })
 })

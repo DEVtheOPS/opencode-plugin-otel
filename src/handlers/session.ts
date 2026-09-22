@@ -19,6 +19,7 @@ import {
   isMetricEnabled,
   isTraceEnabled,
   resolveSessionTraceContext,
+  traceContentAttrs,
 } from "../util.ts"
 import type { HandlerContext, SessionAgentType } from "../types.ts"
 
@@ -36,18 +37,18 @@ export function handleRunStarted(
 ) {
   ctx.activeRuns.set(sessionID, runID)
   ctx.pendingRuns.delete(sessionID)
-  if (promptText) setBoundedMap(ctx.runInputs, runID, promptText)
+  if (promptText && ctx.captureContentInTraces) setBoundedMap(ctx.runInputs, runID, promptText)
   if (!isTraceEnabled("session", ctx)) return
   const existing = ctx.runSpans.get(runID)
   if (existing) {
     existing.setAttributes({
       [AGENT_NAME]: agent,
-      ...(promptText
+      ...traceContentAttrs(ctx, promptText
         ? {
-            [INPUT_VALUE]: promptText,
-            [INPUT_MIME_TYPE]: MimeType.TEXT,
-            [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
-          }
+          [INPUT_VALUE]: promptText,
+          [INPUT_MIME_TYPE]: MimeType.TEXT,
+          [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
+        }
         : {}),
       model,
     })
@@ -64,12 +65,12 @@ export function handleRunStarted(
         [AGENT_NAME]: agent,
         "agent.type": "primary",
         "session.is_subagent": false,
-        ...(promptText
+        ...traceContentAttrs(ctx, promptText
           ? {
-              [INPUT_VALUE]: promptText,
-              [INPUT_MIME_TYPE]: MimeType.TEXT,
-              [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
-            }
+            [INPUT_VALUE]: promptText,
+            [INPUT_MIME_TYPE]: MimeType.TEXT,
+            [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
+          }
           : {}),
         model,
         ...ctx.commonAttrs,

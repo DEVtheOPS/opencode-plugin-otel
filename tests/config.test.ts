@@ -75,6 +75,7 @@ describe("loadConfig", () => {
     "OPENCODE_DISABLE_METRICS",
     "OPENCODE_DISABLE_LOGS",
     "OPENCODE_CAPTURE_PROMPT_IN_LOGS",
+    "OPENCODE_DISABLE_TRACE_CONTENT",
     "OPENCODE_DISABLE_TRACES",
     "OPENCODE_TRACE_PROPAGATION_PROVIDERS",
     "OTEL_EXPORTER_OTLP_HEADERS",
@@ -89,6 +90,7 @@ describe("loadConfig", () => {
     expect(cfg.enabled).toBe(false)
     expect(cfg.logsEnabled).toBe(true)
     expect(cfg.capturePromptInLogs).toBe(false)
+    expect(cfg.captureContentInTraces).toBe(true)
     expect(cfg.endpoint).toBe("http://localhost:4317")
     expect(cfg.protocol).toBe("grpc")
     expect(cfg.metricsInterval).toBe(60000)
@@ -108,6 +110,11 @@ describe("loadConfig", () => {
   test("capturePromptInLogs is true when OPENCODE_CAPTURE_PROMPT_IN_LOGS is set", () => {
     process.env["OPENCODE_CAPTURE_PROMPT_IN_LOGS"] = "1"
     expect(loadConfig().capturePromptInLogs).toBe(true)
+  })
+
+  test("captureContentInTraces is false when OPENCODE_DISABLE_TRACE_CONTENT is set", () => {
+    process.env["OPENCODE_DISABLE_TRACE_CONTENT"] = "1"
+    expect(loadConfig().captureContentInTraces).toBe(false)
   })
 
   test("reads custom endpoint", () => {
@@ -357,6 +364,7 @@ describe("loadConfig options", () => {
     "OPENCODE_OTLP_METRICS_TEMPORALITY",
     "OPENCODE_DISABLE_METRICS",
     "OPENCODE_DISABLE_LOGS",
+    "OPENCODE_DISABLE_TRACE_CONTENT",
     "OPENCODE_DISABLE_TRACES",
     "OPENCODE_TRACE_PROPAGATION_PROVIDERS",
     "OTEL_EXPORTER_OTLP_HEADERS",
@@ -377,6 +385,15 @@ describe("loadConfig options", () => {
 
   test("option logsEnabled:false disables logs", () => {
     expect(loadConfig({ logsEnabled: false }).logsEnabled).toBe(false)
+  })
+
+  test("option captureContentInTraces:false disables span payloads", () => {
+    expect(loadConfig({ captureContentInTraces: false }).captureContentInTraces).toBe(false)
+  })
+
+  test("option captureContentInTraces:true overrides DISABLE env", () => {
+    process.env["OPENCODE_DISABLE_TRACE_CONTENT"] = "1"
+    expect(loadConfig({ captureContentInTraces: true }).captureContentInTraces).toBe(true)
   })
 
   test("option endpoint overrides env var", () => {

@@ -85,6 +85,25 @@ export function isTraceEnabled(name: string, ctx: { disabledTraces: Set<string> 
 }
 
 /**
+ * Returns `true` when span payloads (prompts, completions, tool args/results) should be exported.
+ * Independent of {@link isTraceEnabled}: traces can still be emitted without content.
+ */
+export function isTraceContentEnabled(ctx: { captureContentInTraces: boolean }): boolean {
+  return ctx.captureContentInTraces
+}
+
+/**
+ * Returns `attrs` when span content capture is enabled, otherwise an empty object.
+ * Use for OpenInference `input.*` / `output.*`, `llm.*_messages`, and `tool.parameters`.
+ */
+export function traceContentAttrs<T extends Record<string, unknown>>(
+  ctx: { captureContentInTraces: boolean },
+  attrs: T,
+): T | Record<string, never> {
+  return isTraceContentEnabled(ctx) ? attrs : {}
+}
+
+/**
  * Accumulates token and cost totals for a session, and increments the message count.
  * Uses `setBoundedMap` to produce a new object rather than mutating in-place.
  * No-ops silently if the session was not previously registered via `handleSessionCreated`.

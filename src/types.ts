@@ -96,6 +96,8 @@ export type HandlerContext = {
   sessionDiffTotals: Map<string, { additions: number; deletions: number }>
   disabledMetrics: Set<string>
   disabledTraces: Set<string>
+  /** When false, spans omit prompts, completions, and tool payloads. Default true. */
+  captureContentInTraces: boolean
   tracer: Tracer
   tracePrefix: string
   rootContext: () => Context

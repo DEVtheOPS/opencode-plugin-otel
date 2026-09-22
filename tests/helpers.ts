@@ -229,6 +229,7 @@ export function makeCtx(
     sessionDiffTotals: new Map(),
     disabledMetrics: new Set(disabledMetrics),
     disabledTraces: new Set(disabledTraces),
+    captureContentInTraces: true,
     tracer: tracer as unknown as Tracer,
     tracePrefix: "opencode.",
     rootContext: () => ROOT_CONTEXT,
