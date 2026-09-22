@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test"
-import { handleMessageUpdated, handleMessagePartUpdated } from "../../src/handlers/message.ts"
+import { trace } from "@opentelemetry/api"
+import { handleMessageUpdated, handleMessagePartUpdated, startMessageSpan } from "../../src/handlers/message.ts"
 import { makeCtx } from "../helpers.ts"
 import type { EventMessageUpdated, EventMessagePartUpdated } from "@opencode-ai/sdk"
 
@@ -233,6 +234,17 @@ describe("handleMessageUpdated", () => {
     expect(pluginLog.calls.find(c => c.level === "error")?.level).toBe("error")
   })
 
+  test("correlates the api_request log record with the LLM span", async () => {
+    const { ctx, tracer, logger } = makeCtx()
+    startMessageSpan("ses_1", "msg_1", "user_1", "claude-3-5-sonnet", "anthropic", 1000, ctx, "build")
+    await handleMessageUpdated(makeAssistantMessageUpdated({}), ctx)
+    const record = logger.records.find((r) => r.body === "api_request")!
+    const llmSpan = tracer.spans.find((s) => s.name === "opencode.llm")!
+    expect(record.context).toBeDefined()
+    expect(trace.getSpanContext(record.context!)?.spanId).toBe(llmSpan.spanContext().spanId)
+    expect(trace.getSpanContext(record.context!)?.traceId).toBe(llmSpan.spanContext().traceId)
+  })
+
   test("uses assistant.time.created as log timestamp", async () => {
     const { ctx, logger } = makeCtx()
     await handleMessageUpdated(
@@ -300,6 +312,17 @@ describe("handleMessagePartUpdated", () => {
     expect(record.attributes?.["success"]).toBe(false)
     expect(record.attributes?.["error"]).toBe("tool failed")
     expect(pluginLog.calls.find(c => c.level === "error")?.level).toBe("error")
+  })
+
+  test("correlates the tool_result log record with the tool span", async () => {
+    const { ctx, tracer, logger } = makeCtx()
+    await handleMessagePartUpdated(makeToolPartUpdated("running"), ctx)
+    await handleMessagePartUpdated(makeToolPartUpdated("completed"), ctx)
+    const record = logger.records.find((r) => r.body === "tool_result")!
+    const toolSpan = tracer.spans.find((s) => s.name === "opencode.tool.bash")!
+    expect(record.context).toBeDefined()
+    expect(trace.getSpanContext(record.context!)?.spanId).toBe(toolSpan.spanContext().spanId)
+    expect(trace.getSpanContext(record.context!)?.traceId).toBe(toolSpan.spanContext().traceId)
   })
 
   test("removes entry from pendingToolSpans after completion", async () => {

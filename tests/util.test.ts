@@ -1,6 +1,16 @@
 import { describe, test, expect } from "bun:test"
-import { errorSummary, genAiProviderName, setBoundedMap, isMetricEnabled, isTraceEnabled } from "../src/util.ts"
+import { ROOT_CONTEXT, trace, type Span } from "@opentelemetry/api"
+import {
+  contextForSpanContext,
+  errorSummary,
+  genAiProviderName,
+  resolveLogContext,
+  setBoundedMap,
+  isMetricEnabled,
+  isTraceEnabled,
+} from "../src/util.ts"
 import { MAX_PENDING } from "../src/types.ts"
+import { makeCtx } from "./helpers.ts"
 
 describe("errorSummary", () => {
   test("returns 'unknown' for undefined", () => {
@@ -116,6 +126,72 @@ describe("isMetricEnabled", () => {
 
   test("unknown metric names in disabled set do not affect known metrics", () => {
     expect(isMetricEnabled("retry.count", { disabledMetrics: new Set(["does.not.exist"]) })).toBe(true)
+  })
+})
+
+describe("contextForSpanContext", () => {
+  test("returns undefined when there is no span context", () => {
+    const { ctx } = makeCtx()
+    expect(contextForSpanContext(undefined, ctx)).toBeUndefined()
+  })
+
+  test("activates the span context on the plugin root context", () => {
+    const { ctx } = makeCtx()
+    const spanContext = {
+      traceId: "0000000000000000000000000000000a",
+      spanId: "000000000000000b",
+      traceFlags: 1,
+    }
+    const context = contextForSpanContext(spanContext, ctx)!
+    expect(trace.getSpanContext(context)).toMatchObject(spanContext)
+  })
+})
+
+describe("resolveLogContext", () => {
+  test("returns undefined when the record has no session id", () => {
+    const { ctx } = makeCtx()
+    expect(resolveLogContext({ body: "orphan" }, ctx)).toBeUndefined()
+  })
+
+  test("parents a session-scoped record to the active run span", () => {
+    const { ctx, tracer } = makeCtx()
+    const runSpan = tracer.startSpan("opencode.session", {}, ROOT_CONTEXT)
+    ctx.runSpans.set("user_1", runSpan as unknown as Span)
+    ctx.activeRuns.set("ses_1", "user_1")
+
+    const context = resolveLogContext(
+      { body: "user_prompt", attributes: { "session.id": "ses_1" } },
+      ctx,
+    )!
+
+    expect(trace.getSpanContext(context)?.spanId).toBe(runSpan.spanContext().spanId)
+    expect(trace.getSpanContext(context)?.traceId).toBe(runSpan.spanContext().traceId)
+  })
+
+  test("prefers an explicit record context over session resolution", () => {
+    const { ctx } = makeCtx()
+    const explicit = {
+      traceId: "0000000000000000000000000000000c",
+      spanId: "000000000000000d",
+      traceFlags: 1,
+    }
+    const record = {
+      body: "tool_result",
+      attributes: { "session.id": "ses_1" },
+      context: trace.setSpanContext(ROOT_CONTEXT, explicit),
+    }
+
+    expect(trace.getSpanContext(resolveLogContext(record, ctx)!)).toMatchObject(explicit)
+  })
+
+  test("falls back to the root context for an unknown session", () => {
+    const { ctx } = makeCtx()
+    const context = resolveLogContext(
+      { body: "session.idle", attributes: { "session.id": "ses_unknown" } },
+      ctx,
+    )!
+    expect(context).toBeDefined()
+    expect(trace.getSpanContext(context)).toBeUndefined()
   })
 })
 
