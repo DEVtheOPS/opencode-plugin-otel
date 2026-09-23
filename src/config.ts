@@ -29,6 +29,8 @@ export type PluginConfig = {
   disabledMetrics: Set<string>
   disabledTraces: Set<string>
   tracePropagationProviders: Set<string>
+  redactSecrets: boolean
+  redactValues: string[]
 }
 
 export function parseAttributePairs(raw: string | undefined): Record<string, string> {
@@ -73,6 +75,8 @@ export type OtelPluginOptions = {
   disabledMetrics?: string[]
   disabledTraces?: string[]
   tracePropagationProviders?: string[]
+  redactSecrets?: boolean
+  redactValues?: string[]
 }
 
 const VALID_PROTOCOLS = new Set<PluginConfig["protocol"]>(["grpc", "http/protobuf", "http/json"])
@@ -212,7 +216,27 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
     disabledMetrics,
     disabledTraces,
     tracePropagationProviders,
+    redactSecrets: pickBoolean(resolvedOptions.redactSecrets) ?? !hasNonEmptyEnv("OPENCODE_NO_REDACT"),
+    redactValues: collectRedactValues(resolvedOptions.redactValues),
   }
+}
+
+/**
+ * Exact values to mask verbatim: any configured `redactValues` plus the values of
+ * secret-looking environment variables (e.g. `LOGFIRE_TOKEN`, `*_API_KEY`). Short values
+ * are ignored so common words are not over-redacted.
+ */
+function collectRedactValues(configured: string[] | undefined): string[] {
+  const values = new Set<string>()
+  for (const value of configured ?? []) {
+    if (typeof value === "string" && value.length >= 6) values.add(value)
+  }
+  const secretEnv = /(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CLIENT_?SECRET|CREDENTIAL)/i
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!value || value.length < 6) continue
+    if (secretEnv.test(key)) values.add(value)
+  }
+  return [...values]
 }
 
 export function resolveHelperPath(

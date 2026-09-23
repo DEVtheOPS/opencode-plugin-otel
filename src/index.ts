@@ -364,3 +364,7 @@ export const OtelPlugin: Plugin = async ({ project, client, directory, worktree 
     }),
   }
 }
+
+// OpenCode V2 entrypoint. V2 reads the default export's `id` and `setup()`; V1 keeps using
+// the named `OtelPlugin` export above. See src/v2/index.ts.
+export { default } from "./v2/index.ts"

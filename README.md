@@ -9,6 +9,7 @@
 
 An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemetry (OTLP over gRPC or HTTP/protobuf), mirroring the same signals as [Claude Code's monitoring](https://code.claude.com/docs/en/monitoring-usage).
 
+- [OpenCode V2 support](#opencode-v2-support)
 - [What it instruments](#what-it-instruments)
   - [Metrics](#metrics)
   - [Log events](#log-events)
@@ -28,6 +29,23 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
   - [Claude Code dashboard compatibility](#claude-code-dashboard-compatibility)
 - [Local development](#local-development)
 - [GitHub Discord notifications](#github-discord-notifications)
+
+## OpenCode V2 support
+
+This plugin supports **OpenCode V1 and V2 from one package**:
+
+- **V1** uses the named `OtelPlugin` export.
+- **V2** uses the default export (`id: devtheops.otel`, `setup()`), which reads V2's granular
+  event stream — `session.step.*`, `session.tool.*`, `session.usage.*`, `session.execution.*`,
+  and `session.retry.scheduled`.
+
+V2 support covers session, LLM-step and tool spans, token/cost/cache metrics, the retry
+counter, execution-failure handling, and `model.request` trace-context injection. The V1
+handlers for `message.updated`, `message.part.updated`, `permission.*`, `command.executed`,
+and `session.diff` have no V2 equivalent and are not ported.
+
+V2 additionally supports optional prompt capture (`capturePromptInLogs`) and best-effort
+secret redaction (`redactSecrets`, `redactValues`) — see the plugin options below.
 
 ## What it instruments
 

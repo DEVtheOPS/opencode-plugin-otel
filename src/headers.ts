@@ -1,4 +1,5 @@
 import { createRequire } from "module"
+import { execFile } from "node:child_process"
 import { ExportResultCode, type ExportResult } from "@opentelemetry/core"
 import type { PushMetricExporter, ResourceMetrics } from "@opentelemetry/sdk-metrics"
 import type { SpanExporter, ReadableSpan } from "@opentelemetry/sdk-trace-base"
@@ -89,24 +90,26 @@ export class DynamicHeaders {
   }
 
   private async runHelper(): Promise<HeadersMap> {
-    const proc = Bun.spawn([this.helper!], {
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: this.helperTimeoutMs,
-      killSignal: "SIGTERM",
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        this.helper!,
+        [],
+        { timeout: this.helperTimeoutMs, killSignal: "SIGTERM", maxBuffer: 1024 * 1024 },
+        (error, out, err) => {
+          if (error) {
+            const signal = (error as NodeJS.ErrnoException & { signal?: string | null }).signal
+            if (signal) {
+              reject(new Error(`OTLP headers helper was terminated by ${signal}`))
+              return
+            }
+            const detail = (err ?? "").trim() || error.message
+            reject(new Error(`OTLP headers helper failed: ${detail}`))
+            return
+          }
+          resolve(out)
+        },
+      )
     })
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ])
-    if (proc.signalCode) {
-      throw new Error(`OTLP headers helper was terminated by ${proc.signalCode}`)
-    }
-    if (exitCode !== 0) {
-      const detail = stderr.trim() || `exit code ${exitCode}`
-      throw new Error(`OTLP headers helper failed: ${detail}`)
-    }
     const parsed = JSON.parse(stdout) as unknown
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error("OTLP headers helper must return a JSON object")
