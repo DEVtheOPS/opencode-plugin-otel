@@ -15,6 +15,8 @@ import { errorSummary, type V2Error, type V2ToolContent } from "../v2.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 const TOOL_NAME = "tool.name"
+/** Tools that spawn a child (subagent) session; their span parents the subagent's tree. */
+const SUBAGENT_TOOL = /^(subagent|task)$/i
 
 /** Remembers the tool name for a call id, since V2 carries it only on `session.tool.input.started`. */
 export function handleToolInputStarted(data: { sessionID: string; id: string; name?: string }, ctx: HandlerContext) {
@@ -46,6 +48,8 @@ export function handleToolCalled(
     }),
   )
   ctx.pendingToolSpans.set(data.id, { tool, sessionID: data.sessionID, startMs: Date.now(), span })
+  // Let a subagent session created during this call nest under the dispatch span.
+  if (SUBAGENT_TOOL.test(tool)) setBoundedMap(ctx.pendingSubagentSpans, data.sessionID, span)
 }
 
 /** Ends the tool span successfully and records its duration. */
@@ -100,5 +104,6 @@ function finishTool(
 
   ctx.pendingToolSpans.delete(id)
   ctx.pendingToolNames.delete(id)
+  if (SUBAGENT_TOOL.test(tool)) ctx.pendingSubagentSpans.delete(sessionID)
   ctx.log("debug", error ? "otel: tool.failed" : "otel: tool.success", { sessionID, tool, duration })
 }

@@ -55,17 +55,20 @@ export function resolveSessionTraceContext(
   input?: { assistantMessageID?: string; runID?: string },
 ) {
   const baseCtx = ctx.rootContext()
-  const sessionSpan = ctx.sessionSpans.get(sessionID)
-  if (sessionSpan) return trace.setSpan(baseCtx, sessionSpan)
-  const sessionSpanContext = ctx.sessionSpanContexts.get(sessionID)
-  if (sessionSpanContext) return trace.setSpanContext(baseCtx, sessionSpanContext)
+  // Prefer the active turn run span so LLM/tool spans nest under it; the run span itself is
+  // nested under the subagent session span by handleRunStarted.
   if (input?.runID) return resolveRunTraceContext(input.runID, ctx)
   const assistantRunID = input?.assistantMessageID
     ? ctx.assistantRuns.get(input.assistantMessageID)
     : undefined
   if (assistantRunID) return resolveRunTraceContext(assistantRunID, ctx)
   const activeRunID = ctx.activeRuns.get(sessionID)
-  return activeRunID ? resolveRunTraceContext(activeRunID, ctx) : baseCtx
+  if (activeRunID) return resolveRunTraceContext(activeRunID, ctx)
+  const sessionSpan = ctx.sessionSpans.get(sessionID)
+  if (sessionSpan) return trace.setSpan(baseCtx, sessionSpan)
+  const sessionSpanContext = ctx.sessionSpanContexts.get(sessionID)
+  if (sessionSpanContext) return trace.setSpanContext(baseCtx, sessionSpanContext)
+  return baseCtx
 }
 
 /**

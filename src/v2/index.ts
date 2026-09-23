@@ -1,5 +1,5 @@
 import { logs } from "@opentelemetry/api-logs"
-import { diag, DiagLogLevel, ROOT_CONTEXT, trace } from "@opentelemetry/api"
+import { diag, DiagLogLevel, ROOT_CONTEXT, trace, type Span } from "@opentelemetry/api"
 import { appendFileSync, mkdirSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
@@ -12,7 +12,6 @@ import {
   handleExecutionEnded,
   handleExecutionFailed,
   handleExecutionStarted,
-  handleRunStarted,
   handleSessionCreated,
   handleSessionIdle,
   handleSessionStatus,
@@ -81,6 +80,7 @@ const TRACING_KEY = "__opencode_otel_tracing_v1__"
 
 type TracingState = {
   seenEvents: Set<string>
+  pendingSubagentSpans: Map<string, Span>
   runPrompts: Map<string, string>
   promptEmitted: Set<string>
   pendingToolSpans: HandlerContext["pendingToolSpans"]
@@ -100,6 +100,7 @@ type TracingState = {
 function emptyTracing(): TracingState {
   return {
     seenEvents: new Set(),
+    pendingSubagentSpans: new Map(),
     runPrompts: new Map(),
     promptEmitted: new Set(),
     pendingToolSpans: new Map(),
@@ -268,6 +269,7 @@ export default {
       commonAttrs,
       pendingToolSpans: tracing.pendingToolSpans,
       pendingToolNames: tracing.pendingToolNames,
+      pendingSubagentSpans: tracing.pendingSubagentSpans,
       sessionTotals: tracing.sessionTotals,
       sessionMeta: tracing.sessionMeta,
       disabledMetrics: config.disabledMetrics,
@@ -330,12 +332,10 @@ export default {
             diagLog(`prompt enrich failed session=${sessionID}: ${err instanceof Error ? err.message : String(err)}`)
           }
         }
-        const agent = meta?.agent ?? hctx.sessionTotals.get(sessionID)?.agent ?? "unknown"
-        const model = meta?.model ?? "unknown"
         const promptText: string = event?.prompt?.text ?? ""
-        handleRunStarted(event.messageID, sessionID, agent, promptText, model, Date.now(), hctx)
-        // The user_prompt log is emitted on the first step, where agent/model are resolved.
-        setBoundedMap(hctx.runPrompts, event.messageID, promptText)
+        // The run span is created on `session.execution.started` — an event ordered after
+        // `session.created` — so a subagent's run span can nest under its session span.
+        setBoundedMap(hctx.runPrompts, sessionID, promptText)
       }),
     )
 

@@ -1,5 +1,5 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
-import { SpanStatusCode } from "@opentelemetry/api"
+import { SpanStatusCode, trace } from "@opentelemetry/api"
 import {
   AGENT_NAME,
   INPUT_MIME_TYPE,
@@ -92,10 +92,15 @@ export function handleRunStarted(
   ctx.activeRuns.set(sessionID, runID)
   const safePrompt = ctx.redact(promptText)
   if (!isTraceEnabled("session", ctx)) return
+  const totals = ctx.sessionTotals.get(sessionID)
+  const agentType: SessionAgentType | "unknown" = totals?.agentType ?? "primary"
+  const isSubagent = agentType === "subagent"
   const existing = ctx.runSpans.get(runID)
   if (existing) {
     existing.setAttributes({
       [AGENT_NAME]: agent,
+      "agent.type": agentType,
+      "session.is_subagent": isSubagent,
       ...(promptText
         ? {
             [INPUT_VALUE]: safePrompt,
@@ -116,8 +121,8 @@ export function handleRunStarted(
         [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.AGENT,
         [SESSION_ID]: sessionID,
         [AGENT_NAME]: agent,
-        "agent.type": "primary",
-        "session.is_subagent": false,
+        "agent.type": agentType,
+        "session.is_subagent": isSubagent,
         ...(promptText
           ? {
               [INPUT_VALUE]: safePrompt,
@@ -129,7 +134,11 @@ export function handleRunStarted(
         ...ctx.commonAttrs,
       },
     },
-    ctx.rootContext(),
+    // Subagent turns nest under their session span (itself under the parent's dispatch
+    // tool span); primary turns resolve to the root context.
+    ctx.sessionSpans.get(sessionID)
+      ? trace.setSpan(ctx.rootContext(), ctx.sessionSpans.get(sessionID)!)
+      : ctx.rootContext(),
   )
   ctx.runSpans.set(runID, runSpan)
   setBoundedMap(ctx.runSpanContexts, runID, runSpan.spanContext())
@@ -152,6 +161,12 @@ export function handleSessionCreated(
   })
 
   if (isTraceEnabled("session", ctx) && data.parentID) {
+    // Nest under the parent's subagent-dispatch tool span when available, so the whole
+    // subagent subtree hangs off `opencode.tool.subagent`.
+    const dispatchSpan = ctx.pendingSubagentSpans.get(data.parentID)
+    const parentContext = dispatchSpan
+      ? trace.setSpan(ctx.rootContext(), dispatchSpan)
+      : resolveSessionTraceContext(data.parentID, ctx)
     const sessionSpan = ctx.tracer.startSpan(
       `${ctx.tracePrefix}session`,
       {
@@ -166,7 +181,7 @@ export function handleSessionCreated(
           ...ctx.commonAttrs,
         },
       },
-      resolveSessionTraceContext(data.parentID, ctx),
+      parentContext,
     )
     ctx.sessionSpans.set(sessionID, sessionSpan)
     setBoundedMap(ctx.sessionSpanContexts, sessionID, sessionSpan.spanContext())
@@ -222,14 +237,42 @@ function endRunSpan(sessionID: string, ctx: HandlerContext, error?: string) {
   if (runID) ctx.runSpans.delete(runID)
 }
 
-/** V2 emits this per turn; ensures totals exist and starts a run span if the prompt hook missed it. */
+/** Ends a subagent session span (created on `session.created`) so it exports at turn end. */
+function endSessionSpan(sessionID: string, ctx: HandlerContext, error?: string) {
+  const sessionSpan = ctx.sessionSpans.get(sessionID)
+  if (!sessionSpan) return
+  const totals = ctx.sessionTotals.get(sessionID)
+  if (totals) {
+    sessionSpan.setAttributes({
+      [AGENT_NAME]: totals.agent,
+      "agent.type": totals.agentType,
+      "session.total_tokens": totals.tokens,
+      "session.total_cost_usd": totals.cost,
+      "session.total_messages": totals.messages,
+    })
+  }
+  if (error) {
+    sessionSpan.setStatus({ code: SpanStatusCode.ERROR, message: error })
+    sessionSpan.setAttribute("error", error)
+  } else {
+    sessionSpan.setStatus({ code: SpanStatusCode.OK })
+  }
+  sessionSpan.end()
+  ctx.sessionSpans.delete(sessionID)
+}
+
+/** V2 emits this per turn; creates the run span (ordered after `session.created`). */
 export function handleExecutionStarted(data: { sessionID: string }, ctx: HandlerContext) {
   const sessionID = data.sessionID
   ensureSessionTotals(sessionID, "unknown", "primary", Date.now(), ctx)
-  if (!ctx.activeRuns.get(sessionID)) {
-    const agent = ctx.sessionTotals.get(sessionID)?.agent ?? "unknown"
-    handleRunStarted(`${sessionID}:exec:${Date.now()}`, sessionID, agent, "", "unknown", Date.now(), ctx)
-  }
+  if (ctx.activeRuns.get(sessionID)) return
+  const meta = ctx.sessionMeta.get(sessionID)
+  const totals = ctx.sessionTotals.get(sessionID)
+  const agent = meta?.agent ?? totals?.agent ?? "unknown"
+  const model = meta?.model ?? "unknown"
+  const promptText = ctx.runPrompts.get(sessionID) ?? ""
+  // runID = sessionID: one run span per turn, ended (and replaced) on execution end.
+  handleRunStarted(sessionID, sessionID, agent, promptText, model, Date.now(), ctx)
 }
 
 /** V2 emits this when a turn completes; ends the run span. */
@@ -242,6 +285,10 @@ export function handleExecutionEnded(
   const totals = ctx.sessionTotals.get(sessionID)
   const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
   endRunSpan(sessionID, ctx, error ? errorSummary(error) : undefined)
+  endSessionSpan(sessionID, ctx, error ? errorSummary(error) : undefined)
+  // Clear per-turn state so the next turn starts a fresh run span and prompt log.
+  ctx.promptEmitted.delete(sessionID)
+  ctx.runPrompts.delete(sessionID)
 
   const attrs = { ...ctx.commonAttrs, "session.id": sessionID }
   if (totals) {
@@ -300,12 +347,7 @@ export function handleSessionIdle(sessionID: string, ctx: HandlerContext) {
     }
   }
   endRunSpan(sessionID, ctx)
-  const sessionSpan = ctx.sessionSpans.get(sessionID)
-  if (sessionSpan) {
-    sessionSpan.setStatus({ code: SpanStatusCode.OK })
-    sessionSpan.end()
-    ctx.sessionSpans.delete(sessionID)
-  }
+  endSessionSpan(sessionID, ctx)
 
   ctx.emitLog({
     severityNumber: SeverityNumber.INFO,
