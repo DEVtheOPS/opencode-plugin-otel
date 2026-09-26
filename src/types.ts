@@ -149,9 +149,11 @@ export type TracingState = {
   sessionProjects: Map<string, string>
   sessionIdentity: Map<string, SessionIdentity>
   stepOutputs: Map<string, Map<number, string>>
-  pendingPrompts: Map<string, PendingPrompt>
+  pendingPrompts: Map<string, PendingPrompt[]>
+  activePrompts: Map<string, PendingPrompt>
   pendingPermissions: Map<string, PendingPermission>
   activeLlm: Map<string, LlmRequestContext>
+  provisionalLlm: Map<string, Span>
 }
 
 /** Shared context threaded through every event handler. */

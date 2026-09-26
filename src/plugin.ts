@@ -121,8 +121,8 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
     async (id) => ctx.session.get({ sessionID: id }),
   )
 
-  await ctx.session.hook("model.request", (event) => {
-    handleModelRequest(event, hctx)
+  await ctx.session.hook("model.request", async (event) => {
+    await handleModelRequest(event, await scoped(event.sessionID))
   })
 
   const dispatch = async (event: OpenCodeEvent): Promise<void> => {

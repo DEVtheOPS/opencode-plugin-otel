@@ -82,6 +82,12 @@ describe("buildResource", () => {
     const resource = buildResource("0.0.1")
     expect(resource.attributes["service.name"]).toBe("my-override")
   })
+
+  test("explicit accepted attributes ignore a rejected location's environment", () => {
+    process.env["OTEL_RESOURCE_ATTRIBUTES"] = "team=rejected"
+    expect(buildResource("2.0.0", "team=accepted").attributes["team"]).toBe("accepted")
+    expect(buildResource("2.0.0", "").attributes["team"]).toBeUndefined()
+  })
 })
 
 describe("setupOtel", () => {

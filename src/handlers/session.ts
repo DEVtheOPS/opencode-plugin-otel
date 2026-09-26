@@ -33,7 +33,9 @@ export function handlePromptEnqueued(e: EventOf<"session.inbox.enqueued">, ctx: 
   for (const agent of item.payload.agents ?? []) parts.push(agent.name)
   for (const skill of item.payload.skills ?? []) parts.push(skill.name)
   const text = parts.filter(Boolean).join("\n")
-  setBoundedMap(ctx.tracing.pendingPrompts, sessionID, { text, startMs: e.created })
+  const queue = ctx.tracing.pendingPrompts.get(sessionID) ?? []
+  if (queue.length < 100) queue.push({ text, startMs: e.created })
+  setBoundedMap(ctx.tracing.pendingPrompts, sessionID, queue)
   const totals = ctx.tracing.sessionTotals.get(sessionID)
   ctx.emitLog({
     severityNumber: SeverityNumber.INFO,
@@ -161,7 +163,10 @@ export function handleSessionCreated(e: EventOf<"session.created">, ctx: Handler
 export function handleExecutionStarted(e: EventOf<"session.execution.started">, ctx: HandlerContext) {
   const sessionID = e.data.sessionID
   const totals = ensureSession(sessionID, e.created, ctx)
-  const pendingPrompt = ctx.tracing.pendingPrompts.get(sessionID)
+  const queue = ctx.tracing.pendingPrompts.get(sessionID)
+  const pendingPrompt = queue?.shift()
+  if (queue?.length === 0) ctx.tracing.pendingPrompts.delete(sessionID)
+  if (pendingPrompt) setBoundedMap(ctx.tracing.activePrompts, sessionID, pendingPrompt)
 
   if (!isTraceEnabled("session", ctx)) return
 
@@ -313,7 +318,7 @@ export function finalizeSession(sessionID: string, ctx: HandlerContext) {
   }
   ctx.tracing.sessionTotals.delete(sessionID)
   ctx.tracing.activeLlm.delete(sessionID)
-  ctx.tracing.pendingPrompts.delete(sessionID)
+  ctx.tracing.activePrompts.delete(sessionID)
 
   const attrs = { ...ctx.commonAttrs, "session.id": sessionID }
   const durationMs = Date.now() - totals.startMs
@@ -354,6 +359,13 @@ export function finalizeSession(sessionID: string, ctx: HandlerContext) {
 
 /** Ends and clears any dangling step/tool spans for a session execution. */
 function sweepExecution(sessionID: string, ctx: HandlerContext) {
+  const provisional = ctx.tracing.provisionalLlm.get(sessionID)
+  if (provisional) {
+    provisional.setStatus({ code: SpanStatusCode.ERROR, message: "execution ended before step started" })
+    provisional.end()
+    ctx.tracing.provisionalLlm.delete(sessionID)
+    ctx.tracing.activeLlm.delete(sessionID)
+  }
   for (const [callID, span] of ctx.tracing.toolSpans) {
     if (ctx.tracing.toolMeta.get(callID)?.sessionID !== sessionID) continue
     span.setStatus({ code: SpanStatusCode.ERROR, message: "session execution ended before tool completed" })

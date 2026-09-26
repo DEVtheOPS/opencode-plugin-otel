@@ -83,34 +83,43 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
   }
 
   if (!isTraceEnabled("llm", ctx)) return
-  const promptText = ctx.tracing.pendingPrompts.get(d.sessionID)?.text
-
-  const span = ctx.tracer.startSpan(
+  const promptText = ctx.tracing.activePrompts.get(d.sessionID)?.text
+  const attributes = {
+    [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.LLM,
+    [SESSION_ID]: d.sessionID,
+    [AGENT_NAME]: d.agent,
+    "agent.type": agentType,
+    [LLM_SYSTEM]: d.model.providerID,
+    [LLM_PROVIDER]: d.model.providerID,
+    "gen_ai.provider.name": genAiProviderName(d.model.providerID),
+    [LLM_MODEL_NAME]: d.model.id,
+    ...(promptText
+      ? {
+          [INPUT_VALUE]: promptText,
+          [INPUT_MIME_TYPE]: MimeType.TEXT,
+          [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
+        }
+      : {}),
+    ...ctx.commonAttrs,
+  }
+  const active = ctx.tracing.activeLlm.get(d.sessionID)
+  const provisional = ctx.tracing.provisionalLlm.get(d.sessionID)
+  ctx.tracing.provisionalLlm.delete(d.sessionID)
+  const matches = provisional && active?.agent === d.agent && active.modelID === d.model.id && active.providerID === d.model.providerID
+  if (provisional && !matches) {
+    provisional.setStatus({ code: SpanStatusCode.ERROR, message: "model request did not match step" })
+    provisional.end()
+  }
+  const span = matches ? provisional : ctx.tracer.startSpan(
     `${ctx.tracePrefix}llm`,
     {
       startTime: d.started ?? e.created,
       kind: SpanKind.CLIENT,
-      attributes: {
-        [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.LLM,
-        [SESSION_ID]: d.sessionID,
-        [AGENT_NAME]: d.agent,
-        "agent.type": agentType,
-        [LLM_SYSTEM]: d.model.providerID,
-        [LLM_PROVIDER]: d.model.providerID,
-        "gen_ai.provider.name": genAiProviderName(d.model.providerID),
-        [LLM_MODEL_NAME]: d.model.id,
-        ...(promptText
-          ? {
-              [INPUT_VALUE]: promptText,
-              [INPUT_MIME_TYPE]: MimeType.TEXT,
-              [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
-            }
-          : {}),
-        ...ctx.commonAttrs,
-      },
+      attributes,
     },
     resolveRunContext(d.sessionID, ctx),
   )
+  if (matches) span.setAttributes(attributes)
   setBoundedMap(ctx.tracing.stepSpans, d.assistantMessageID, span)
   setBoundedMap(ctx.tracing.stepSpanContexts, d.assistantMessageID, span.spanContext())
   setBoundedMap(ctx.tracing.activeLlm, d.sessionID, {
@@ -292,9 +301,12 @@ function recordUsageMetrics(
 }
 
 function cleanupStep(assistantMessageID: string, sessionID: string, ctx: HandlerContext) {
+  const spanContext = ctx.tracing.stepSpanContexts.get(assistantMessageID)
   ctx.tracing.stepSpans.delete(assistantMessageID)
   ctx.tracing.stepSpanContexts.delete(assistantMessageID)
   ctx.tracing.stepMeta.delete(assistantMessageID)
-  ctx.tracing.activeLlm.delete(sessionID)
+  if (spanContext && ctx.tracing.activeLlm.get(sessionID)?.spanContext.spanId === spanContext.spanId) {
+    ctx.tracing.activeLlm.delete(sessionID)
+  }
   ctx.tracing.stepOutputs.delete(assistantMessageID)
 }

@@ -52,6 +52,7 @@ export async function acquireSharedOtel(config: PluginConfig, version: string): 
         version,
         config.otlpHeaders,
         config.otlpHeadersHelper,
+        config.resourceAttributes,
       )
       const shared: SharedOtel = {
         providers,
@@ -113,8 +114,10 @@ export function acquireTracingState(): TracingState {
       sessionIdentity: new Map(),
       stepOutputs: new Map(),
       pendingPrompts: new Map(),
+      activePrompts: new Map(),
       pendingPermissions: new Map(),
       activeLlm: new Map(),
+      provisionalLlm: new Map(),
     }
     g[TRACING_KEY] = state
   }

@@ -47,7 +47,7 @@ describe("handlePromptEnqueued", () => {
     expect(logger.records[0]!.body).toBe("user_prompt")
     expect(logger.records[0]!.attributes?.["delivery"]).toBe("queue")
     expect(logger.records[0]!.attributes?.["prompt"]).toBeUndefined()
-    expect(ctx.tracing.pendingPrompts.get("ses_1")!.text).toBe("hello")
+    expect(ctx.tracing.pendingPrompts.get("ses_1")![0]!.text).toBe("hello")
   })
 
   test("skips non-user inbox items", () => {
@@ -63,14 +63,14 @@ describe("handleExecutionStarted", () => {
   test("starts a run span and attaches the pending prompt", () => {
     const { ctx, tracer } = makeCtx()
     handleSessionCreated(evt("session.created", { sessionID: "ses_1" }), ctx)
-    ctx.tracing.pendingPrompts.set("ses_1", { text: "hello", startMs: 1 })
+    ctx.tracing.pendingPrompts.set("ses_1", [{ text: "hello", startMs: 1 }])
     handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }, 2000), ctx)
     const span = tracer.spans[0]!
     expect(span.name).toBe("opencode.session")
     expect(span.startTime).toBe(2000)
     expect(span.attributes["input.value"]).toBe("hello")
     expect(ctx.tracing.runSpans.has("ses_1")).toBe(true)
-    expect(ctx.tracing.pendingPrompts.get("ses_1")!.text).toBe("hello")
+    expect(ctx.tracing.activePrompts.get("ses_1")!.text).toBe("hello")
   })
 
   test("nests subagent runs under the parent run span", () => {
@@ -103,6 +103,23 @@ describe("handleExecutionStarted", () => {
     expect(ctx.tracing.sessionTotals.get("sub")?.agentType).toBe("subagent")
     expect(ctx.tracing.sessionTotals.get("sub")?.agent).toBe("explore")
     expect(tracer.spans.at(-1)?.parentSpan).toBe(tracer.spans[0])
+  })
+
+  test("retains a prompt queued during the current execution for the next run", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1", projectID: "p" }), ctx)
+    const prompt = (text: string) => evt("session.inbox.enqueued", {
+      sessionID: "ses_1", inboxID: text,
+      item: { type: "user", payload: { text }, delivery: "queue" },
+    })
+    handlePromptEnqueued(prompt("first"), ctx, false)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    handlePromptEnqueued(prompt("second"), ctx, false)
+    handleExecutionEnded(evt("session.execution.succeeded", { sessionID: "ses_1" }), ctx, { type: "succeeded" })
+    finalizeSession("ses_1", ctx)
+    expect(ctx.tracing.pendingPrompts.get("ses_1")?.[0]?.text).toBe("second")
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    expect(tracer.spans.at(-1)?.attributes["input.value"]).toBe("second")
   })
 })
 
