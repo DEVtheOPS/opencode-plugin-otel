@@ -15,16 +15,19 @@ bun install
 
 ## Development workflow
 
-Point your local opencode config at the repo so changes are picked up immediately without a build step. In `~/.config/opencode/opencode.json`:
+Install dependencies in the checkout with `bun install`. In the project where you run
+OpenCode, create `.opencode/plugins/otel/index.ts`:
 
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["/path/to/opencode-plugin-otel/src/index.ts"]
-}
+```ts
+export { default } from "/path/to/opencode-plugin-otel/src/index.ts"
 ```
 
-opencode loads TypeScript natively via Bun, so there is no build step required during development.
+OpenCode V2 discovers the directory automatically and loads TypeScript via Bun, so
+there is no build step during development. A `plugins` entry pointing directly to
+an absolute `.ts` file is rejected by OpenCode `2.0.1`.
+
+> **Branching:** `main` targets OpenCode V2. The OpenCode V1 plugin is maintained on the `v1` branch
+> (branched from the last `1.x` tag) — open V1 bug/security fixes against `v1`, not `main`.
 
 ## Commands
 
@@ -39,17 +42,20 @@ opencode loads TypeScript natively via Bun, so there is no build step required d
 
 ```text
 src/
-├── index.ts              — Plugin entrypoint, wires everything together
+├── index.ts              — Plugin entrypoint (V2 default export)
+├── plugin.ts             — setup(): config, hooks, event subscription
+├── state.ts              — shared OTel SDK + tracing state
 ├── types.ts              — Shared types (Level, HandlerContext, Instruments, etc.)
 ├── config.ts             — Environment config loading and log level resolution
 ├── otel.ts               — OTel SDK setup, resource construction, instrument creation
 ├── probe.ts              — TCP connectivity probe for the OTLP endpoint
 ├── util.ts               — Utility functions (errorSummary, setBoundedMap)
 └── handlers/
-    ├── session.ts        — session.created / session.idle / session.error
-    ├── message.ts        — message.updated / message.part.updated
-    ├── permission.ts     — permission.updated / permission.replied
-    └── activity.ts       — session.diff / command.executed
+    ├── session.ts        — session.created / session.execution.* / session.status
+    ├── step.ts           — session.step.* (LLM spans + token/cost metrics)
+    ├── tool.ts           — session.tool.* (tool spans, subagents, duration, commits)
+    ├── permission.ts     — permission.asked / permission.replied
+    └── chat-headers.ts   — context preview and model.request / WebSocket propagation
 ```
 
 ## Testing locally with a collector

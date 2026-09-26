@@ -8,7 +8,7 @@ import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-grpc"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc"
 import { OTLPLogExporter as OTLPHttpLogExporter } from "@opentelemetry/exporter-logs-otlp-http"
 import { OTLPLogExporter as OTLPProtoLogExporter } from "@opentelemetry/exporter-logs-otlp-proto"
-import { OTLPMetricExporter as OTLPHttpMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http"
+import { OTLPMetricExporter as OTLPHttpMetricExporter, AggregationTemporalityPreference } from "@opentelemetry/exporter-metrics-otlp-http"
 import { OTLPMetricExporter as OTLPProtoMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto"
 import { OTLPTraceExporter as OTLPHttpTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { OTLPTraceExporter as OTLPProtoTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto"
@@ -16,7 +16,7 @@ import { resourceFromAttributes } from "@opentelemetry/resources"
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions"
 import { ATTR_HOST_ARCH } from "@opentelemetry/semantic-conventions/incubating"
 import type { Instruments } from "./types.ts"
-import { parseAttributePairs } from "./config.ts"
+import { parseAttributePairs, type MetricsTemporality } from "./config.ts"
 import {
   createGrpcMetadata,
   DynamicHeaders,
@@ -32,13 +32,13 @@ import {
  * `host.arch`. Additional attributes from `OTEL_RESOURCE_ATTRIBUTES` are merged in and
  * may override the defaults.
  */
-export function buildResource(version: string) {
+export function buildResource(version: string, resourceAttributes = process.env["OTEL_RESOURCE_ATTRIBUTES"]) {
   const attrs: Record<string, string> = {
     [ATTR_SERVICE_NAME]: "opencode",
     "app.version": version,
     "os.type": process.platform,
     [ATTR_HOST_ARCH]: process.arch,
-    ...parseAttributePairs(process.env["OTEL_RESOURCE_ATTRIBUTES"]),
+    ...parseAttributePairs(resourceAttributes),
   }
   return resourceFromAttributes(attrs)
 }
@@ -65,6 +65,32 @@ export function buildHttpSignalUrl(endpoint: string, signal: "traces" | "metrics
   return url.toString()
 }
 
+function withoutOtlpHeaderEnvironment<T>(create: () => T): T {
+  const keys = [
+    "OTEL_EXPORTER_OTLP_HEADERS",
+    "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+    "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+    "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+  ]
+  const previous = keys.map((key) => process.env[key])
+  for (const key of keys) delete process.env[key]
+  try {
+    return create()
+  } finally {
+    keys.forEach((key, index) => {
+      const value = previous[index]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    })
+  }
+}
+
+function metricTemporalityPreference(value: MetricsTemporality | undefined): AggregationTemporalityPreference {
+  if (value === "delta") return AggregationTemporalityPreference.DELTA
+  if (value === "lowmemory") return AggregationTemporalityPreference.LOWMEMORY
+  return AggregationTemporalityPreference.CUMULATIVE
+}
+
 /**
  * Initialises the OTel SDK — creates a `MeterProvider`, `LoggerProvider`, and
  * `BasicTracerProvider` backed by OTLP exporters (gRPC or HTTP/protobuf)
@@ -78,10 +104,13 @@ export async function setupOtel(
   version: string,
   otlpHeaders?: string,
   otlpHeadersHelper?: string,
+  resourceAttributes?: string,
+  metricsTemporality?: MetricsTemporality,
 ): Promise<OtelProviders> {
-  const resource = buildResource(version)
+  const resource = buildResource(version, resourceAttributes ?? "")
   const staticHeaders = parseOtlpHeaders(otlpHeaders)
   const dynamicHeaders = new DynamicHeaders(staticHeaders, otlpHeadersHelper)
+  const temporalityPreference = metricTemporalityPreference(metricsTemporality)
   if (otlpHeadersHelper) {
     try {
       await dynamicHeaders.refresh()
@@ -89,21 +118,21 @@ export async function setupOtel(
       console.warn("[opencode-plugin-otel] Failed to prewarm OTLP headers helper. Falling back to refresh-on-auth-failure.", error)
     }
   }
-  const makeMetricExporter = (headers: HeadersMap) => protocol === "http/protobuf"
-    ? new OTLPProtoMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers })
+  const makeMetricExporter = (headers: HeadersMap) => withoutOtlpHeaderEnvironment(() => protocol === "http/protobuf"
+    ? new OTLPProtoMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers, temporalityPreference })
     : protocol === "http/json"
-      ? new OTLPHttpMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers })
-      : new OTLPMetricExporter({ url: endpoint, metadata: createGrpcMetadata(headers) })
-  const makeLogExporter = (headers: HeadersMap) => protocol === "http/protobuf"
+      ? new OTLPHttpMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers, temporalityPreference })
+      : new OTLPMetricExporter({ url: endpoint, metadata: createGrpcMetadata(headers), temporalityPreference }))
+  const makeLogExporter = (headers: HeadersMap) => withoutOtlpHeaderEnvironment(() => protocol === "http/protobuf"
     ? new OTLPProtoLogExporter({ url: buildHttpSignalUrl(endpoint, "logs"), headers })
     : protocol === "http/json"
       ? new OTLPHttpLogExporter({ url: buildHttpSignalUrl(endpoint, "logs"), headers })
-      : new OTLPLogExporter({ url: endpoint, metadata: createGrpcMetadata(headers) })
-  const makeTraceExporter = (headers: HeadersMap) => protocol === "http/protobuf"
+      : new OTLPLogExporter({ url: endpoint, metadata: createGrpcMetadata(headers) }))
+  const makeTraceExporter = (headers: HeadersMap) => withoutOtlpHeaderEnvironment(() => protocol === "http/protobuf"
     ? new OTLPProtoTraceExporter({ url: buildHttpSignalUrl(endpoint, "traces"), headers })
     : protocol === "http/json"
       ? new OTLPHttpTraceExporter({ url: buildHttpSignalUrl(endpoint, "traces"), headers })
-      : new OTLPTraceExporter({ url: endpoint, metadata: createGrpcMetadata(headers) })
+      : new OTLPTraceExporter({ url: endpoint, metadata: createGrpcMetadata(headers) }))
   const metricExporter = otlpHeadersHelper
     ? new RefreshingMetricExporter(makeMetricExporter, dynamicHeaders)
     : makeMetricExporter(staticHeaders)
@@ -160,14 +189,6 @@ export function createInstruments(prefix: string): Instruments {
       unit: "USD",
       description: "Cost of the opencode session in USD",
     }),
-    linesCounter: meter.createCounter(`${prefix}lines_of_code.count`, {
-      unit: "{line}",
-      description: "Gross positive churn of lines added/removed across a session. Emits the positive delta vs. the previous session.diff; negative deltas (cumulative shrinkage) are dropped, so sums do not reconcile to net after any revert. Use lines_of_code.total for the authoritative live cumulative.",
-    }),
-    linesTotalGauge: meter.createGauge(`${prefix}lines_of_code.total`, {
-      unit: "{line}",
-      description: "Authoritative live cumulative lines added/removed for the current session. Mirrors opencode's session.diff cumulative value on every event; tracks partial and full reverts faithfully.",
-    }),
     commitCounter: meter.createCounter(`${prefix}commit.count`, {
       unit: "{commit}",
       description: "Number of git commits created",
@@ -178,7 +199,7 @@ export function createInstruments(prefix: string): Instruments {
     }),
     cacheCounter: meter.createCounter(`${prefix}cache.count`, {
       unit: "{request}",
-      description: "Token cache activity (cacheRead/cacheCreation) per completed assistant message",
+      description: "Token cache activity (cacheRead/cacheCreation) per completed LLM step",
     }),
     sessionDurationHistogram: meter.createHistogram(`${prefix}session.duration`, {
       unit: "ms",
@@ -188,13 +209,13 @@ export function createInstruments(prefix: string): Instruments {
       unit: "{message}",
       description: "Number of completed assistant messages per session",
     }),
-    sessionTokenGauge: meter.createHistogram(`${prefix}session.token.total`, {
+    sessionTokenHistogram: meter.createHistogram(`${prefix}session.token.total`, {
       unit: "tokens",
-      description: "Total tokens consumed per session, recorded as a histogram on session idle",
+      description: "Total tokens consumed per session, recorded as a histogram when an execution ends",
     }),
-    sessionCostGauge: meter.createHistogram(`${prefix}session.cost.total`, {
+    sessionCostHistogram: meter.createHistogram(`${prefix}session.cost.total`, {
       unit: "USD",
-      description: "Total cost per session in USD, recorded as a histogram on session idle",
+      description: "Total cost per session in USD, recorded as a histogram when an execution ends",
       advice: {
         explicitBucketBoundaries: [0.01, 0.05, 0.10, 0.25, 0.50, 1.00, 2.50, 5.00, 10.00, 25.00],
       },
@@ -205,11 +226,11 @@ export function createInstruments(prefix: string): Instruments {
     }),
     retryCounter: meter.createCounter(`${prefix}retry.count`, {
       unit: "{retry}",
-      description: "Number of API retries observed via session.status events",
+      description: "Number of API retries observed via session.retry.scheduled events",
     }),
     subtaskCounter: meter.createCounter(`${prefix}subtask.count`, {
       unit: "{subtask}",
-      description: "Number of sub-agent invocations observed via subtask message parts",
+      description: "Number of sub-agent sessions observed via session.created with a parentID",
     }),
   }
 }

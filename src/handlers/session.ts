@@ -1,6 +1,5 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import { SpanStatusCode } from "@opentelemetry/api"
-import type { EventSessionCreated, EventSessionIdle, EventSessionError, EventSessionStatus } from "@opencode-ai/sdk"
 import {
   AGENT_NAME,
   INPUT_MIME_TYPE,
@@ -11,59 +10,199 @@ import {
   SemanticConventions,
   SESSION_ID,
 } from "@arizeai/openinference-semantic-conventions"
+import type { EventOf, HandlerContext, SessionAgentType, SessionTotals } from "../types.ts"
 import {
   agentAttrs,
   errorSummary,
-  getSessionAgentMeta,
-  setBoundedMap,
   isMetricEnabled,
   isTraceEnabled,
-  resolveSessionTraceContext,
+  markSeen,
+  modelRef,
+  resolveSubagentTraceContext,
+  setBoundedMap,
+  totalTokens,
 } from "../util.ts"
-import type { HandlerContext, SessionAgentType } from "../types.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 
-/** Starts or refreshes the root run span for a single user turn, keyed by the user message ID. */
-export function handleRunStarted(
-  runID: string,
-  sessionID: string,
-  agent: string,
-  promptText: string,
-  model: string,
-  startTime: number,
-  ctx: HandlerContext,
-) {
-  ctx.activeRuns.set(sessionID, runID)
-  ctx.pendingRuns.delete(sessionID)
-  if (promptText) setBoundedMap(ctx.runInputs, runID, promptText)
-  if (!isTraceEnabled("session", ctx)) return
-  const existing = ctx.runSpans.get(runID)
-  if (existing) {
-    existing.setAttributes({
-      [AGENT_NAME]: agent,
-      ...(promptText
-        ? {
-            [INPUT_VALUE]: promptText,
-            [INPUT_MIME_TYPE]: MimeType.TEXT,
-            [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
-          }
-        : {}),
-      model,
+export function handlePromptEnqueued(e: EventOf<"session.inbox.enqueued">, ctx: HandlerContext, capturePrompt: boolean) {
+  const { sessionID, inboxID, item } = e.data
+  if (item.type !== "user") return
+  const parts = [item.payload.text]
+  for (const file of item.payload.files ?? []) parts.push(file.name ?? (file.source.type === "uri" ? file.source.uri : ""))
+  for (const agent of item.payload.agents ?? []) parts.push(agent.name)
+  for (const skill of item.payload.skills ?? []) parts.push(skill.name)
+  const text = parts.filter(Boolean).join("\n")
+  if (item.delivery === "steer" && ctx.tracing.activeExecutions.has(sessionID)) {
+    const active = ctx.tracing.activePrompts.get(sessionID)
+    setBoundedMap(ctx.tracing.activePrompts, sessionID, {
+      text: active?.text ? `${active.text}\n${text}` : text,
+      startMs: active?.startMs ?? e.created,
     })
-    return
+  } else {
+    const queue = ctx.tracing.pendingPrompts.get(sessionID) ?? []
+    if (queue.length < 100) queue.push({ text, startMs: e.created })
+    setBoundedMap(ctx.tracing.pendingPrompts, sessionID, queue)
+  }
+  const totals = ctx.tracing.sessionTotals.get(sessionID)
+  ctx.emitLog({
+    severityNumber: SeverityNumber.INFO,
+    severityText: "INFO",
+    timestamp: e.created,
+    observedTimestamp: Date.now(),
+    body: "user_prompt",
+    attributes: {
+      "event.name": "user_prompt",
+      "session.id": sessionID,
+      "message.id": inboxID,
+      ...(totals ? agentAttrs(totals.agent, totals.agentType) : {}),
+      prompt_length: text.length,
+      ...(capturePrompt ? { prompt: text } : {}),
+      delivery: item.delivery,
+      ...ctx.commonAttrs,
+    },
+  })
+}
+
+function countSession(sessionID: string, isSubagent: boolean, ctx: HandlerContext) {
+  if (ctx.tracing.countedSessions.has(sessionID)) return
+  markSeen(ctx.tracing.countedSessions, sessionID)
+  if (isMetricEnabled("session.count", ctx)) {
+    ctx.instruments.sessionCounter.add(1, {
+      ...ctx.commonAttrs,
+      "session.id": sessionID,
+      is_subagent: isSubagent,
+    })
+  }
+}
+
+/**
+ * Ensures session totals exist for a session id. OpenCode does not replay durable
+ * events, so a session created before the plugin subscribed (for example a
+ * pre-existing session resumed with `opencode run`) never emits `session.created`;
+ * the first event we observe for it initializes and counts the session lazily.
+ */
+export function ensureSession(sessionID: string, at: number, ctx: HandlerContext): SessionTotals {
+  const existing = ctx.tracing.sessionTotals.get(sessionID)
+  if (existing) return existing
+  const identity = ctx.tracing.sessionIdentity.get(sessionID)
+  countSession(sessionID, identity?.agentType === "subagent", ctx)
+  const totals: SessionTotals = {
+    startMs: identity?.startMs ?? at,
+    tokens: identity?.tokens ?? 0,
+    cost: identity?.cost ?? 0,
+    messages: identity?.messages ?? 0,
+    agent: identity?.agent ?? "unknown",
+    agentType: identity?.agentType ?? "primary",
+    ...(identity?.parentID ? { parentID: identity.parentID } : {}),
+  }
+  setBoundedMap(ctx.tracing.sessionTotals, sessionID, totals)
+  return totals
+}
+
+/** Increments the session counter, records totals, and emits a `session.created` log event. */
+export function handleSessionCreated(e: EventOf<"session.created">, ctx: HandlerContext) {
+  const d = e.data
+  const isSubagent = !!d.parentID
+  const agentType: SessionAgentType = isSubagent ? "subagent" : "primary"
+  const agent = d.agent ?? "unknown"
+
+  setBoundedMap(ctx.tracing.sessionProjects, d.sessionID, d.projectID)
+  setBoundedMap(ctx.tracing.sessionIdentity, d.sessionID, {
+    agent,
+    agentType,
+    ...(d.parentID ? { parentID: d.parentID } : {}),
+    startMs: e.created,
+  })
+  countSession(d.sessionID, isSubagent, ctx)
+  if (isSubagent && isMetricEnabled("subtask.count", ctx)) {
+    ctx.instruments.subtaskCounter.add(1, {
+      ...ctx.commonAttrs,
+      "session.id": d.sessionID,
+      "agent.type": "subagent",
+    })
+  }
+  if (isSubagent) {
+    ctx.emitLog({
+      severityNumber: SeverityNumber.INFO,
+      severityText: "INFO",
+      timestamp: e.created,
+      observedTimestamp: Date.now(),
+      body: "subtask_invoked",
+      attributes: {
+        "event.name": "subtask_invoked",
+        "session.id": d.sessionID,
+        "parent.session.id": d.parentID,
+        ...agentAttrs(agent, agentType),
+        ...ctx.commonAttrs,
+      },
+    })
   }
 
-  const runSpan = ctx.tracer.startSpan(
+  setBoundedMap(ctx.tracing.sessionTotals, d.sessionID, {
+    startMs: e.created,
+    tokens: ctx.tracing.sessionTotals.get(d.sessionID)?.tokens ?? 0,
+    cost: ctx.tracing.sessionTotals.get(d.sessionID)?.cost ?? 0,
+    messages: ctx.tracing.sessionTotals.get(d.sessionID)?.messages ?? 0,
+    agent,
+    agentType,
+    ...(d.parentID ? { parentID: d.parentID } : {}),
+  })
+
+  ctx.emitLog({
+    severityNumber: SeverityNumber.INFO,
+    severityText: "INFO",
+    timestamp: e.created,
+    observedTimestamp: Date.now(),
+    body: "session.created",
+    attributes: {
+      "event.name": "session.created",
+      "session.id": d.sessionID,
+      is_subagent: isSubagent,
+      ...agentAttrs(agent, agentType),
+      ...(d.model ? { model: modelRef(d.model) } : {}),
+      ...ctx.commonAttrs,
+    },
+  })
+  void ctx.log("info", "otel: session.created", { sessionID: d.sessionID, isSubagent })
+}
+
+export function handleAgentSelected(e: EventOf<"session.agent.selected">, ctx: HandlerContext) {
+  const { sessionID, agent } = e.data
+  const identity = ctx.tracing.sessionIdentity.get(sessionID)
+  if (identity) setBoundedMap(ctx.tracing.sessionIdentity, sessionID, { ...identity, agent })
+  const totals = ctx.tracing.sessionTotals.get(sessionID)
+  if (totals) setBoundedMap(ctx.tracing.sessionTotals, sessionID, { ...totals, agent })
+}
+
+/** Starts the root run span for a single execution (user turn), keyed by session id. */
+export function handleExecutionStarted(e: EventOf<"session.execution.started">, ctx: HandlerContext) {
+  const sessionID = e.data.sessionID
+  markSeen(ctx.tracing.activeExecutions, sessionID)
+  const totals = ensureSession(sessionID, e.created, ctx)
+  const queue = ctx.tracing.pendingPrompts.get(sessionID)
+  const pendingPrompt = queue?.shift()
+  if (queue?.length === 0) ctx.tracing.pendingPrompts.delete(sessionID)
+  if (pendingPrompt) setBoundedMap(ctx.tracing.activePrompts, sessionID, pendingPrompt)
+
+  if (!isTraceEnabled("session", ctx)) return
+
+  const isSubagent = totals?.agentType === "subagent"
+  const parentCtx = isSubagent && totals?.parentID
+    ? resolveSubagentTraceContext(sessionID, totals.parentID, totals.agent, ctx)
+    : ctx.rootContext()
+  const promptText = pendingPrompt?.text ?? ""
+
+  const span = ctx.tracer.startSpan(
     `${ctx.tracePrefix}session`,
     {
-      startTime,
+      startTime: e.created,
       attributes: {
         [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.AGENT,
         [SESSION_ID]: sessionID,
-        [AGENT_NAME]: agent,
-        "agent.type": "primary",
-        "session.is_subagent": false,
+        [AGENT_NAME]: totals?.agent ?? "unknown",
+        "agent.type": totals?.agentType ?? "primary",
+        "session.is_subagent": isSubagent,
         ...(promptText
           ? {
               [INPUT_VALUE]: promptText,
@@ -71,148 +210,163 @@ export function handleRunStarted(
               [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
             }
           : {}),
-        model,
         ...ctx.commonAttrs,
       },
     },
-    ctx.rootContext(),
+    parentCtx,
   )
-  ctx.runSpans.set(runID, runSpan)
-  setBoundedMap(ctx.runSpanContexts, runID, runSpan.spanContext())
+  setBoundedMap(ctx.tracing.runSpans, sessionID, span)
+  setBoundedMap(ctx.tracing.runSpanContexts, sessionID, span.spanContext())
 }
 
-/** Increments the session counter, records start time, starts the root session span, and emits a `session.created` log event. */
-export function handleSessionCreated(e: EventSessionCreated, ctx: HandlerContext) {
-  const { id: sessionID, time, parentID } = e.properties.info
-  const createdAt = time.created
-  const isSubagent = !!parentID
-  const agentType: SessionAgentType = isSubagent ? "subagent" : "primary"
-  if (isMetricEnabled("session.count", ctx)) {
-    ctx.instruments.sessionCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, is_subagent: isSubagent })
-  }
-  setBoundedMap(ctx.sessionTotals, sessionID, { startMs: createdAt, tokens: 0, cost: 0, messages: 0, agent: "unknown", agentType })
+/** Terminal execution events that end the root run span. */
+export type ExecutionOutcome =
+  | { type: "succeeded" }
+  | { type: "failed"; error: { type: string; message: string; status?: number } }
+  | { type: "interrupted"; reason: string }
 
-  if (isTraceEnabled("session", ctx) && parentID) {
-    const sessionSpan = ctx.tracer.startSpan(
-      `${ctx.tracePrefix}session`,
-      {
-        startTime: createdAt,
-        attributes: {
-          [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.AGENT,
-          [SESSION_ID]: sessionID,
-          [AGENT_NAME]: "unknown",
-          "agent.type": agentType,
-          "session.is_subagent": isSubagent,
-          ...ctx.commonAttrs,
-        },
+/**
+ * Ends the root run span for an execution with the given outcome and emits a
+ * `session.error` log event when the execution failed.
+ */
+export function handleExecutionEnded(
+  e: EventOf<"session.execution.succeeded"> | EventOf<"session.execution.failed"> | EventOf<"session.execution.interrupted">,
+  ctx: HandlerContext,
+  outcome: ExecutionOutcome,
+) {
+  const sessionID = e.data.sessionID
+  const totals = ctx.tracing.sessionTotals.get(sessionID)
+  ctx.tracing.activeExecutions.delete(sessionID)
+  const pendingDispatch = ctx.tracing.subagentParents.get(sessionID)
+  if (pendingDispatch) {
+    ctx.tracing.subagentParents.delete(sessionID)
+    markSeen(ctx.tracing.consumedSubagentDispatches, pendingDispatch.callID)
+  }
+
+  sweepExecution(sessionID, ctx)
+
+  const span = ctx.tracing.runSpans.get(sessionID)
+  if (span) {
+    if (totals) {
+      span.setAttributes({
+        [AGENT_NAME]: totals.agent,
+        "agent.type": totals.agentType,
+        "session.total_tokens": totals.tokens,
+        "session.total_cost_usd": totals.cost,
+        "session.total_messages": totals.messages,
+      })
+    }
+    if (outcome.type === "failed") {
+      const message = errorSummary(outcome.error)
+      span.setStatus({ code: SpanStatusCode.ERROR, message })
+      span.setAttribute("error", message)
+    } else if (outcome.type === "interrupted") {
+      span.setAttribute("session.interrupted_reason", outcome.reason)
+      span.setStatus({ code: SpanStatusCode.OK })
+    } else {
+      span.setStatus({ code: SpanStatusCode.OK })
+    }
+    span.end(e.created)
+    ctx.tracing.runSpans.delete(sessionID)
+    ctx.tracing.runSpanContexts.delete(sessionID)
+  }
+
+  if (outcome.type === "failed") {
+    const message = errorSummary(outcome.error)
+    ctx.emitLog({
+      severityNumber: SeverityNumber.ERROR,
+      severityText: "ERROR",
+      timestamp: e.created,
+      observedTimestamp: Date.now(),
+      body: "session.error",
+      attributes: {
+        "event.name": "session.error",
+        "session.id": sessionID,
+        error: message,
+        ...agentAttrs(totals?.agent ?? "unknown", totals?.agentType ?? "unknown"),
+        ...ctx.commonAttrs,
       },
-      resolveSessionTraceContext(parentID, ctx),
-    )
-    ctx.sessionSpans.set(sessionID, sessionSpan)
-    setBoundedMap(ctx.sessionSpanContexts, sessionID, sessionSpan.spanContext())
-  }
-
-  ctx.emitLog({
-    severityNumber: SeverityNumber.INFO,
-    severityText: "INFO",
-    timestamp: createdAt,
-    observedTimestamp: Date.now(),
-    body: "session.created",
-    attributes: {
-      "event.name": "session.created",
-      "session.id": sessionID,
-      is_subagent: isSubagent,
-      ...agentAttrs("unknown", agentType),
-      ...ctx.commonAttrs,
-    },
-  })
-  return ctx.log("info", "otel: session.created", { sessionID, createdAt, isSubagent })
-}
-
-function sweepSession(sessionID: string, ctx: HandlerContext) {
-  for (const [id, perm] of ctx.pendingPermissions) {
-    if (perm.sessionID === sessionID) ctx.pendingPermissions.delete(id)
-  }
-  for (const [key, span] of ctx.pendingToolSpans) {
-    if (span.sessionID === sessionID) {
-      span.span?.setStatus({ code: SpanStatusCode.ERROR, message: "session ended before tool completed" })
-      span.span?.end()
-      ctx.pendingToolSpans.delete(key)
-    }
-  }
-  ctx.pendingRuns.delete(sessionID)
-  const msgPrefix = `${sessionID}:`
-  for (const [key, span] of ctx.messageSpans) {
-    if (key.startsWith(msgPrefix)) {
-      span.setStatus({ code: SpanStatusCode.ERROR, message: "session ended before message completed" })
-      span.end()
-      ctx.messageSpans.delete(key)
-    }
-  }
-  for (const key of ctx.messageOutputs.keys()) {
-    if (key.startsWith(msgPrefix)) ctx.messageOutputs.delete(key)
-  }
-  for (const key of ctx.llmRequestContexts.keys()) {
-    if (key.startsWith(msgPrefix)) ctx.llmRequestContexts.delete(key)
+    })
+    void ctx.log("error", "otel: session.error", { sessionID, error: message })
   }
 }
 
-/** Emits a `session.idle` log event, records duration and session total histograms, ends the session span, and clears pending state. */
-export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
-  const sessionID = e.properties.sessionID
-  const totals = ctx.sessionTotals.get(sessionID)
-  const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
-  ctx.sessionTotals.delete(sessionID)
-  ctx.sessionDiffTotals.delete(sessionID)
-  sweepSession(sessionID, ctx)
+/** Handles `session.status` idle and retry diagnostics. */
+export function handleSessionStatus(e: EventOf<"session.status">, ctx: HandlerContext) {
+  const { sessionID, status } = e.data
+  if (status.type === "retry") {
+    void ctx.log("debug", "otel: retry scheduled", { sessionID, attempt: status.attempt })
+    return
+  }
+  if (status.type === "idle") finalizeSession(sessionID, ctx)
+}
+
+export function handleRetryScheduled(e: EventOf<"session.retry.scheduled">, ctx: HandlerContext) {
+  if (isMetricEnabled("retry.count", ctx)) {
+    ctx.instruments.retryCounter.add(1, { ...ctx.commonAttrs, "session.id": e.data.sessionID })
+  }
+}
+
+/** Handles the deprecated `session.idle` event as an idle finalization signal. */
+export function handleSessionIdle(e: EventOf<"session.idle">, ctx: HandlerContext) {
+  finalizeSession(e.data.sessionID, ctx)
+}
+
+/**
+ * Updates the running session totals from the authoritative cumulative usage
+ * sample emitted by opencode after each step.
+ */
+export function handleUsageUpdated(e: EventOf<"session.usage.updated">, ctx: HandlerContext) {
+  const { sessionID, cost, tokens } = e.data
+  const existing = ensureSession(sessionID, e.created, ctx)
+  const next: SessionTotals = {
+    ...existing,
+    tokens: totalTokens(tokens) + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0),
+    cost,
+  }
+  setBoundedMap(ctx.tracing.sessionTotals, sessionID, next)
+}
+
+/**
+ * Records session duration and total token/cost histograms and emits a
+ * `session.idle` log, then clears per-session state. No-ops when the session
+ * totals were already finalized, so a status-idle followed by a deprecated
+ * idle event does not double count.
+ */
+export function finalizeSession(sessionID: string, ctx: HandlerContext) {
+  const totals = ctx.tracing.sessionTotals.get(sessionID)
+  if (!totals) {
+    sweepExecution(sessionID, ctx)
+    return
+  }
+  const identity = ctx.tracing.sessionIdentity.get(sessionID)
+  if (identity) {
+    setBoundedMap(ctx.tracing.sessionIdentity, sessionID, {
+      ...identity,
+      agent: totals.agent,
+      agentType: totals.agentType,
+      tokens: totals.tokens,
+      cost: totals.cost,
+      messages: totals.messages,
+    })
+  }
+  ctx.tracing.sessionTotals.delete(sessionID)
+  ctx.tracing.activeLlm.delete(sessionID)
+  ctx.tracing.activeStepSpans.delete(sessionID)
+  ctx.tracing.modelContexts.delete(sessionID)
+  ctx.tracing.activePrompts.delete(sessionID)
+  ctx.tracing.activeExecutions.delete(sessionID)
 
   const attrs = { ...ctx.commonAttrs, "session.id": sessionID }
-  let duration_ms: number | undefined
-
-  if (totals) {
-    duration_ms = Date.now() - totals.startMs
-    if (isMetricEnabled("session.duration", ctx)) {
-      ctx.instruments.sessionDurationHistogram.record(duration_ms, attrs)
-    }
-    if (isMetricEnabled("session.token.total", ctx)) {
-      ctx.instruments.sessionTokenGauge.record(totals.tokens, attrs)
-    }
-    if (isMetricEnabled("session.cost.total", ctx)) {
-      ctx.instruments.sessionCostGauge.record(totals.cost, attrs)
-    }
+  const durationMs = Date.now() - totals.startMs
+  if (isMetricEnabled("session.duration", ctx)) {
+    ctx.instruments.sessionDurationHistogram.record(durationMs, attrs)
   }
-
-  const sessionSpan = ctx.sessionSpans.get(sessionID)
-  if (sessionSpan) {
-    if (totals) {
-      sessionSpan.setAttributes({
-        [AGENT_NAME]: totals.agent,
-        "agent.type": totals.agentType,
-        "session.total_tokens": totals.tokens,
-        "session.total_cost_usd": totals.cost,
-        "session.total_messages": totals.messages,
-      })
-    }
-    sessionSpan.setStatus({ code: SpanStatusCode.OK })
-    sessionSpan.end()
-    ctx.sessionSpans.delete(sessionID)
+  if (isMetricEnabled("session.token.total", ctx)) {
+    ctx.instruments.sessionTokenHistogram.record(totals.tokens, attrs)
   }
-  const runID = ctx.activeRuns.get(sessionID)
-  if (runID) ctx.activeRuns.delete(sessionID)
-  const runSpan = runID ? ctx.runSpans.get(runID) : undefined
-  if (runSpan) {
-    if (totals) {
-      runSpan.setAttributes({
-        [AGENT_NAME]: totals.agent,
-        "agent.type": totals.agentType,
-        "session.total_tokens": totals.tokens,
-        "session.total_cost_usd": totals.cost,
-        "session.total_messages": totals.messages,
-      })
-    }
-    runSpan.setStatus({ code: SpanStatusCode.OK })
-    runSpan.end()
-    ctx.runSpans.delete(runID!)
+  if (isMetricEnabled("session.cost.total", ctx)) {
+    ctx.instruments.sessionCostHistogram.record(totals.cost, attrs)
   }
 
   ctx.emitLog({
@@ -224,77 +378,52 @@ export function handleSessionIdle(e: EventSessionIdle, ctx: HandlerContext) {
     attributes: {
       "event.name": "session.idle",
       "session.id": sessionID,
-      total_tokens: totals?.tokens ?? 0,
-      total_cost_usd: totals?.cost ?? 0,
-      total_messages: totals?.messages ?? 0,
-      ...agentAttrs(agentName, agentType),
+      total_tokens: totals.tokens,
+      total_cost_usd: totals.cost,
+      total_messages: totals.messages,
+      ...agentAttrs(totals.agent, totals.agentType),
       ...ctx.commonAttrs,
     },
   })
-  ctx.log("debug", "otel: session.idle", {
+  void ctx.log("debug", "otel: session.idle", {
     sessionID,
-    ...(totals ? { duration_ms, total_tokens: totals.tokens, total_cost_usd: totals.cost, total_messages: totals.messages } : {}),
+    duration_ms: durationMs,
+    total_tokens: totals.tokens,
+    total_cost_usd: totals.cost,
+    total_messages: totals.messages,
   })
 }
 
-/** Emits a `session.error` log event, ends the session span with error status, and clears any pending state for the session. */
-export function handleSessionError(e: EventSessionError, ctx: HandlerContext) {
-  const rawID = e.properties.sessionID
-  const sessionID = rawID ?? "unknown"
-  const error = errorSummary(e.properties.error)
-  const { agentName, agentType } = rawID ? getSessionAgentMeta(rawID, ctx) : { agentName: "unknown", agentType: "unknown" as const }
-  const totals = rawID ? ctx.sessionTotals.get(rawID) : undefined
-  if (rawID) {
-    ctx.sessionTotals.delete(rawID)
-    ctx.sessionDiffTotals.delete(rawID)
+/** Ends and clears any dangling step/tool spans for a session execution. */
+function sweepExecution(sessionID: string, ctx: HandlerContext) {
+  const provisional = ctx.tracing.provisionalLlm.get(sessionID)
+  if (provisional) {
+    provisional.setStatus({ code: SpanStatusCode.ERROR, message: "execution ended before step started" })
+    provisional.end()
+    ctx.tracing.provisionalLlm.delete(sessionID)
+    ctx.tracing.activeLlm.delete(sessionID)
   }
-  sweepSession(sessionID, ctx)
-
-  if (rawID) {
-    const sessionSpan = ctx.sessionSpans.get(rawID)
-    if (sessionSpan) {
-      if (totals) sessionSpan.setAttributes({ [AGENT_NAME]: totals.agent, "agent.type": totals.agentType })
-      sessionSpan.setStatus({ code: SpanStatusCode.ERROR, message: error })
-      sessionSpan.setAttribute("error", error)
-      sessionSpan.end()
-      ctx.sessionSpans.delete(rawID)
-    }
-    const runID = ctx.activeRuns.get(rawID)
-    if (runID) ctx.activeRuns.delete(rawID)
-    const runSpan = runID ? ctx.runSpans.get(runID) : undefined
-    if (runSpan) {
-      if (totals) runSpan.setAttributes({ [AGENT_NAME]: totals.agent, "agent.type": totals.agentType })
-      runSpan.setStatus({ code: SpanStatusCode.ERROR, message: error })
-      runSpan.setAttribute("error", error)
-      runSpan.end()
-      ctx.runSpans.delete(runID!)
-    }
+  for (const [callID, span] of ctx.tracing.toolSpans) {
+    if (ctx.tracing.toolMeta.get(callID)?.sessionID !== sessionID) continue
+    span.setStatus({ code: SpanStatusCode.ERROR, message: "session execution ended before tool completed" })
+    span.end()
+    ctx.tracing.toolSpans.delete(callID)
+    ctx.tracing.toolSpanContexts.delete(callID)
+    ctx.tracing.toolMeta.delete(callID)
   }
-
-  ctx.emitLog({
-    severityNumber: SeverityNumber.ERROR,
-    severityText: "ERROR",
-    timestamp: Date.now(),
-    observedTimestamp: Date.now(),
-    body: "session.error",
-    attributes: {
-      "event.name": "session.error",
-      "session.id": sessionID,
-      error,
-      ...agentAttrs(agentName, agentType),
-      ...ctx.commonAttrs,
-    },
-  })
-  ctx.log("error", "otel: session.error", { sessionID, error })
-}
-
-/** Increments the retry counter when the session enters a retry state. */
-export function handleSessionStatus(e: EventSessionStatus, ctx: HandlerContext) {
-  if (e.properties.status.type !== "retry") return
-  const { sessionID, status } = e.properties
-  const { attempt, message: retryMessage } = status
-  if (isMetricEnabled("retry.count", ctx)) {
-    ctx.instruments.retryCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID })
-    ctx.log("debug", "otel: retry counter incremented", { sessionID, attempt, retryMessage })
+  for (const [messageID, meta] of ctx.tracing.stepMeta) {
+    if (meta.sessionID !== sessionID) continue
+    const span = ctx.tracing.stepSpans.get(messageID)
+    if (span) {
+      span.setStatus({ code: SpanStatusCode.ERROR, message: "session execution ended before step completed" })
+      span.end()
+    }
+    ctx.tracing.stepSpans.delete(messageID)
+    ctx.tracing.stepSpanContexts.delete(messageID)
+    ctx.tracing.stepMeta.delete(messageID)
+    ctx.tracing.stepOutputs.delete(messageID)
+  }
+  for (const [id, perm] of ctx.tracing.pendingPermissions) {
+    if (perm.sessionID === sessionID) ctx.tracing.pendingPermissions.delete(id)
   }
 }

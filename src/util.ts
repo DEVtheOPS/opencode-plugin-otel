@@ -1,6 +1,7 @@
-import { trace } from "@opentelemetry/api"
-import { MAX_PENDING } from "./types.ts"
-import type { HandlerContext, SessionAgentType } from "./types.ts"
+import { trace, type Context } from "@opentelemetry/api"
+import { MAX_PENDING, type HandlerContext, type SessionAgentType, type TracingState } from "./types.ts"
+
+const MAX_SEEN_EVENTS = 10_000
 
 const GEN_AI_PROVIDER_NAMES: Readonly<Record<string, string>> = {
   "amazon-bedrock": "aws.bedrock",
@@ -13,18 +14,40 @@ const GEN_AI_PROVIDER_NAMES: Readonly<Record<string, string>> = {
   xai: "x_ai",
 }
 
-/** Returns a human-readable summary string from an opencode error object. */
-export function errorSummary(err: { name: string; data?: unknown } | undefined): string {
+/** A structured error as emitted by the OpenCode V2 event stream. */
+export type StructuredError = { type: string; message: string; status?: number }
+
+/** Token counts as emitted by the OpenCode V2 event stream. */
+export type TokenInfo = {
+  input: number
+  output: number
+  reasoning: number
+  cache: { read: number; write: number }
+}
+
+/** A `{ providerID, id }` model reference as emitted by the OpenCode V2 event stream. */
+export type ModelRef = { providerID: string; id: string; variant?: string }
+
+/** Returns a human-readable summary string from a structured error payload. */
+export function errorSummary(err: StructuredError | undefined): string {
   if (!err) return "unknown"
-  if (err.data && typeof err.data === "object" && "message" in err.data) {
-    return `${err.name}: ${(err.data as { message: string }).message}`
-  }
-  return err.name
+  return `${err.type}: ${err.message}`
 }
 
 /** Returns the canonical OTel GenAI provider name, preserving unknown provider IDs. */
 export function genAiProviderName(providerID: string): string {
   return GEN_AI_PROVIDER_NAMES[providerID] ?? providerID
+}
+
+/** Sums billed tokens for a usage sample, excluding cache reads/writes. */
+export function totalTokens(tokens: TokenInfo | undefined): number {
+  if (!tokens) return 0
+  return (tokens.input ?? 0) + (tokens.output ?? 0) + (tokens.reasoning ?? 0)
+}
+
+/** Formats a model reference as `provider/id`, defaulting to `unknown`. */
+export function modelRef(model: ModelRef | undefined): string {
+  return model ? `${model.providerID}/${model.id}` : "unknown"
 }
 
 /**
@@ -39,33 +62,40 @@ export function setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V) {
   map.set(key, value)
 }
 
-/** Resolves a root-run context from the live span first, then from the retained ended span context. */
-export function resolveRunTraceContext(runID: string, ctx: Pick<HandlerContext, "rootContext" | "runSpans" | "runSpanContexts">) {
-  const baseCtx = ctx.rootContext()
-  const runSpan = ctx.runSpans.get(runID)
-  if (runSpan) return trace.setSpan(baseCtx, runSpan)
-  const runSpanContext = ctx.runSpanContexts.get(runID)
-  return runSpanContext ? trace.setSpanContext(baseCtx, runSpanContext) : baseCtx
+/** Records an event id for de-duplication, evicting the oldest entry when at capacity. */
+export function markSeen(seen: TracingState["seenEvents"], id: string): void {
+  if (!seen.has(id) && seen.size >= MAX_SEEN_EVENTS) {
+    const [first] = seen.values()
+    if (first !== undefined) seen.delete(first)
+  }
+  seen.add(id)
 }
 
-/** Resolves the best available trace parent for a session event or message/tool child span. */
-export function resolveSessionTraceContext(
-  sessionID: string,
-  ctx: HandlerContext,
-  input?: { assistantMessageID?: string; runID?: string },
-) {
-  const baseCtx = ctx.rootContext()
-  const sessionSpan = ctx.sessionSpans.get(sessionID)
-  if (sessionSpan) return trace.setSpan(baseCtx, sessionSpan)
-  const sessionSpanContext = ctx.sessionSpanContexts.get(sessionID)
-  if (sessionSpanContext) return trace.setSpanContext(baseCtx, sessionSpanContext)
-  if (input?.runID) return resolveRunTraceContext(input.runID, ctx)
-  const assistantRunID = input?.assistantMessageID
-    ? ctx.assistantRuns.get(input.assistantMessageID)
-    : undefined
-  if (assistantRunID) return resolveRunTraceContext(assistantRunID, ctx)
-  const activeRunID = ctx.activeRuns.get(sessionID)
-  return activeRunID ? resolveRunTraceContext(activeRunID, ctx) : baseCtx
+export function enqueueEvent(state: TracingState, id: string, handle: () => Promise<void>): Promise<void> {
+  const task = state.eventQueue.then(async () => {
+    if (state.seenEvents.has(id)) return
+    await handle()
+    markSeen(state.seenEvents, id)
+  })
+  state.eventQueue = task.catch(() => {})
+  return task
+}
+
+/** Enqueues subscription events without blocking the reader while preserving shared dispatch order. */
+export async function consumeEvents<T extends { id: string }>(
+  events: AsyncIterable<T>,
+  state: TracingState,
+  dispatch: (event: T) => Promise<void>,
+  onError: (event: T, error: unknown) => Promise<void>,
+): Promise<void> {
+  let last = Promise.resolve()
+  try {
+    for await (const event of events) {
+      last = enqueueEvent(state, event.id, () => dispatch(event)).catch((error) => onError(event, error))
+    }
+  } finally {
+    await last
+  }
 }
 
 /**
@@ -84,41 +114,6 @@ export function isTraceEnabled(name: string, ctx: { disabledTraces: Set<string> 
   return !ctx.disabledTraces.has(name)
 }
 
-/**
- * Accumulates token and cost totals for a session, and increments the message count.
- * Uses `setBoundedMap` to produce a new object rather than mutating in-place.
- * No-ops silently if the session was not previously registered via `handleSessionCreated`.
- */
-export function accumulateSessionTotals(
-  sessionID: string,
-  tokens: number,
-  cost: number,
-  ctx: HandlerContext,
-) {
-  const existing = ctx.sessionTotals.get(sessionID)
-  if (!existing) return
-  setBoundedMap(ctx.sessionTotals, sessionID, {
-    startMs: existing.startMs,
-    tokens: existing.tokens + tokens,
-    cost: existing.cost + cost,
-    messages: existing.messages + 1,
-    agent: existing.agent,
-    agentType: existing.agentType,
-  })
-}
-
-/** Returns the current session-scoped agent name/type, defaulting to `unknown` when unavailable. */
-export function getSessionAgentMeta(
-  sessionID: string,
-  ctx: Pick<HandlerContext, "sessionTotals">,
-): { agentName: string; agentType: SessionAgentType | "unknown" } {
-  const totals = ctx.sessionTotals.get(sessionID)
-  return {
-    agentName: totals?.agent ?? "unknown",
-    agentType: totals?.agentType ?? "unknown",
-  }
-}
-
 /** Builds a consistent agent attribute set for OTLP logs, metrics, and spans. */
 export function agentAttrs(agentName: string, agentType: SessionAgentType | "unknown") {
   return {
@@ -126,4 +121,80 @@ export function agentAttrs(agentName: string, agentType: SessionAgentType | "unk
     "agent.name": agentName,
     "agent.type": agentType,
   } as const
+}
+
+/** Resolves the trace context for a run span, falling back to the configured root context. */
+export function resolveRunContext(sessionID: string, ctx: HandlerContext): Context {
+  const base = ctx.rootContext()
+  const span = ctx.tracing.runSpans.get(sessionID)
+  if (span) return trace.setSpan(base, span)
+  const spanContext = ctx.tracing.runSpanContexts.get(sessionID)
+  return spanContext ? trace.setSpanContext(base, spanContext) : base
+}
+
+/** Resolves the trace context for a step span, falling back to its run context. */
+export function resolveStepContext(sessionID: string, assistantMessageID: string, ctx: HandlerContext): Context {
+  const parent = resolveRunContext(sessionID, ctx)
+  const span = ctx.tracing.stepSpans.get(assistantMessageID)
+  if (span) return trace.setSpan(parent, span)
+  const spanContext = ctx.tracing.stepSpanContexts.get(assistantMessageID)
+  return spanContext ? trace.setSpanContext(parent, spanContext) : parent
+}
+
+/** Resolves a child run under its correlated dispatch tool, falling back to the parent run. */
+export function resolveSubagentTraceContext(sessionID: string, parentID: string, agent: string, ctx: HandlerContext): Context {
+  const exact = ctx.tracing.subagentParents.get(sessionID)
+  if (exact) {
+    ctx.tracing.subagentParents.delete(sessionID)
+    markSeen(ctx.tracing.consumedSubagentDispatches, exact.callID)
+    return trace.setSpanContext(ctx.rootContext(), exact.spanContext)
+  }
+  const candidates = [...ctx.tracing.toolMeta]
+    .filter(([id, meta]) => meta.sessionID === parentID && meta.tool === "subagent"
+      && (!meta.childSessionID || meta.childSessionID === sessionID)
+      && !ctx.tracing.consumedSubagentDispatches.has(id)
+      && (!meta.agent || agent === "unknown" || meta.agent === agent) && ctx.tracing.toolSpans.has(id))
+  if (candidates.length === 1) {
+    const callID = candidates[0]![0]
+    markSeen(ctx.tracing.consumedSubagentDispatches, callID)
+    const span = ctx.tracing.toolSpans.get(callID)!
+    return trace.setSpan(ctx.rootContext(), span)
+  }
+  return resolveRunContext(parentID, ctx)
+}
+
+/** Resolves the current session-scoped agent name/type, defaulting to `unknown` when unavailable. */
+export function getSessionAgentMeta(
+  sessionID: string,
+  ctx: HandlerContext,
+): { agentName: string; agentType: SessionAgentType | "unknown" } {
+  const totals = ctx.tracing.sessionTotals.get(sessionID)
+  return {
+    agentName: totals?.agent ?? "unknown",
+    agentType: totals?.agentType ?? "unknown",
+  }
+}
+
+export async function contextForSession(
+  sessionID: string,
+  ctx: HandlerContext,
+  getSession: (sessionID: string) => Promise<{ projectID: string; agent?: string; parentID?: string; time: { created: number } }>,
+): Promise<HandlerContext> {
+  let projectID = ctx.tracing.sessionProjects.get(sessionID)
+  if (!projectID || !ctx.tracing.sessionIdentity.has(sessionID)) {
+    try {
+      const session = await getSession(sessionID)
+      projectID = session.projectID
+      setBoundedMap(ctx.tracing.sessionProjects, sessionID, projectID)
+      setBoundedMap(ctx.tracing.sessionIdentity, sessionID, {
+        agent: session.agent ?? "unknown",
+        agentType: session.parentID ? "subagent" : "primary",
+        ...(session.parentID ? { parentID: session.parentID } : {}),
+        startMs: session.time.created,
+      })
+    } catch {
+      if (!projectID) return ctx
+    }
+  }
+  return projectID ? { ...ctx, commonAttrs: { ...ctx.commonAttrs, "project.id": projectID } } : ctx
 }

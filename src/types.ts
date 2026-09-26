@@ -1,5 +1,7 @@
-import type { Context, Counter, Gauge, Histogram, Span, SpanContext, Tracer } from "@opentelemetry/api"
-import type { LogRecord } from "@opentelemetry/api-logs"
+import type { Context, Counter, Histogram, Span, SpanContext, Tracer } from "@opentelemetry/api"
+import type { LogRecord, Logger } from "@opentelemetry/api-logs"
+import type { Plugin } from "@opencode/plugin"
+import type { OtelProviders } from "./otel.ts"
 
 /** Numeric priority map for log levels; higher value = higher severity. */
 export const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const
@@ -7,10 +9,21 @@ export const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const
 /** Union of supported log level names. */
 export type Level = keyof typeof LEVELS
 
-/** Maximum number of entries kept in `pendingToolSpans` and `pendingPermissions` maps. */
+/** Maximum number of entries kept in bounded correlation maps. */
 export const MAX_PENDING = 500
 
-/** Structured logger forwarded to the opencode `client.app.log` API. */
+/** The OpenCode V2 plugin context passed to `setup`. */
+export type OpenCodeContext = Plugin.Context
+
+type SubscribeResult = ReturnType<OpenCodeContext["event"]["subscribe"]>
+
+/** A single OpenCode V2 server event, as yielded by `ctx.event.subscribe()`. */
+export type OpenCodeEvent = SubscribeResult extends AsyncIterable<infer E> ? E : never
+
+/** Narrows {@link OpenCodeEvent} to a single `type` discriminant. */
+export type EventOf<T extends OpenCodeEvent["type"]> = Extract<OpenCodeEvent, { type: T }>
+
+/** Structured logger for plugin diagnostics, forwarded to the server console. */
 export type PluginLogger = (
   level: Level,
   message: string,
@@ -20,19 +33,17 @@ export type PluginLogger = (
 /** OTel attributes common to every emitted span, log, and metric. */
 export type CommonAttrs = Readonly<Record<string, string>>
 
-/** In-flight tool execution tracked between `running` and `completed`/`error` part updates. */
-export type PendingToolSpan = {
-  tool: string
+/** In-flight permission prompt tracked between `permission.asked` and `permission.replied`. */
+export type PendingPermission = {
+  action: string
+  resources: string[]
   sessionID: string
-  startMs: number
-  span?: Span
 }
 
-/** Permission prompt tracked between `permission.updated` and `permission.replied`. */
-export type PendingPermission = {
-  type: string
-  title: string
-  sessionID: string
+/** Prompt text captured on the `prompt` hook and attached to the next run span. */
+export type PendingPrompt = {
+  text: string
+  startMs: number
 }
 
 /** OTel metric instruments created once at plugin startup and shared via `HandlerContext`. */
@@ -40,15 +51,13 @@ export type Instruments = {
   sessionCounter: Counter
   tokenCounter: Counter
   costCounter: Counter
-  linesCounter: Counter
-  linesTotalGauge: Gauge
   commitCounter: Counter
   toolDurationHistogram: Histogram
   cacheCounter: Counter
   sessionDurationHistogram: Histogram
   messageCounter: Counter
-  sessionTokenGauge: Histogram
-  sessionCostGauge: Histogram
+  sessionTokenHistogram: Histogram
+  sessionCostHistogram: Histogram
   modelUsageCounter: Counter
   retryCounter: Counter
   subtaskCounter: Counter
@@ -57,7 +66,7 @@ export type Instruments = {
 /** Session role emitted by opencode: either the primary/root agent or a spawned subagent. */
 export type SessionAgentType = "primary" | "subagent"
 
-/** Accumulated per-session totals used for gauge snapshots on session.idle. */
+/** Accumulated per-session totals used for gauge snapshots at execution end. */
 export type SessionTotals = {
   startMs: number
   tokens: number
@@ -65,23 +74,104 @@ export type SessionTotals = {
   messages: number
   agent: string
   agentType: SessionAgentType
+  parentID?: string
 }
 
-/** Pending root-run metadata captured from `chat.message` until the user message ID is known. */
-export type PendingRun = {
+export type SessionIdentity = {
   agent: string
-  promptText: string
-  model: string
-  startTime: number
+  agentType: SessionAgentType
+  parentID?: string
+  startMs: number
+  tokens?: number
+  cost?: number
+  messages?: number
 }
 
-/** Live LLM request span metadata used by the outbound header hook. */
+/** Model/agent metadata for an in-flight LLM step, keyed by assistant message ID. */
+export type StepMeta = {
+  sessionID: string
+  startMs: number
+  agent: string
+  agentType: SessionAgentType | "unknown"
+  modelID: string
+  providerID: string
+}
+
+/** Metadata for an in-flight tool call keyed by tool call id. */
+export type ToolMeta = {
+  sessionID: string
+  assistantMessageID: string
+  tool: string
+  startMs: number
+  executionStarted?: boolean
+  command?: string
+  agent?: string
+  childSessionID?: string
+}
+
+/** Live LLM request metadata used by the `model.request` trace-propagation hook. */
 export type LlmRequestContext = {
-  messageID: string
   agent: string
   modelID: string
   providerID: string
   spanContext: SpanContext
+}
+
+/** Bounded model-visible text snapshot awaiting its matching primary request. */
+export type ModelContextSnapshot = {
+  agent: string
+  providerID: string
+  modelID: string
+  inputMessages: string
+  inputValue?: string
+}
+
+/**
+ * Per-process shared OTel SDK instance. OpenCode loads a plugin instance per
+ * location but the OTel global providers may only be registered once, so the
+ * providers, instruments, logger, and tracer are shared via `globalThis`.
+ */
+export type SharedOtel = {
+  providers: OtelProviders
+  instruments: Instruments
+  logger: Logger
+  tracer: Tracer
+  refs: number
+  configKey: string
+}
+
+/**
+ * Per-process tracing correlation state. Span ids are unique across the
+ * process, so a single shared state keeps parent lookups consistent when
+ * multiple plugin instances observe the same stream.
+ */
+export type TracingState = {
+  seenEvents: Set<string>
+  eventQueue: Promise<void>
+  runSpans: Map<string, Span>
+  runSpanContexts: Map<string, SpanContext>
+  stepSpans: Map<string, Span>
+  activeStepSpans: Map<string, Span>
+  stepSpanContexts: Map<string, SpanContext>
+  toolSpans: Map<string, Span>
+  toolSpanContexts: Map<string, SpanContext>
+  subagentParents: Map<string, { spanContext: SpanContext; callID: string }>
+  consumedSubagentDispatches: Set<string>
+  toolMeta: Map<string, ToolMeta>
+  stepMeta: Map<string, StepMeta>
+  sessionTotals: Map<string, SessionTotals>
+  countedSessions: Set<string>
+  countedMessages: Set<string>
+  sessionProjects: Map<string, string>
+  sessionIdentity: Map<string, SessionIdentity>
+  stepOutputs: Map<string, Map<number, string>>
+  pendingPrompts: Map<string, PendingPrompt[]>
+  activePrompts: Map<string, PendingPrompt>
+  activeExecutions: Set<string>
+  pendingPermissions: Map<string, PendingPermission>
+  activeLlm: Map<string, LlmRequestContext>
+  provisionalLlm: Map<string, Span>
+  modelContexts: Map<string, ModelContextSnapshot>
 }
 
 /** Shared context threaded through every event handler. */
@@ -90,25 +180,11 @@ export type HandlerContext = {
   emitLog: (record: LogRecord) => void
   instruments: Instruments
   commonAttrs: CommonAttrs
-  pendingToolSpans: Map<string, PendingToolSpan>
-  pendingPermissions: Map<string, PendingPermission>
-  sessionTotals: Map<string, SessionTotals>
-  sessionDiffTotals: Map<string, { additions: number; deletions: number }>
   disabledMetrics: Set<string>
   disabledTraces: Set<string>
   tracer: Tracer
   tracePrefix: string
   rootContext: () => Context
-  runSpans: Map<string, Span>
-  runSpanContexts: Map<string, SpanContext>
-  activeRuns: Map<string, string>
-  assistantRuns: Map<string, string>
-  pendingRuns: Map<string, PendingRun>
-  runInputs: Map<string, string>
-  sessionSpans: Map<string, Span>
-  sessionSpanContexts: Map<string, SpanContext>
-  messageSpans: Map<string, Span>
-  messageOutputs: Map<string, string>
-  llmRequestContexts: Map<string, LlmRequestContext[]>
+  tracing: TracingState
   tracePropagationProviders: Set<string>
 }

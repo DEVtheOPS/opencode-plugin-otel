@@ -1,6 +1,6 @@
-import type { HandlerContext, Instruments } from "../src/types.ts"
+import type { HandlerContext, Instruments, TracingState, OpenCodeEvent } from "../src/types.ts"
 import type { LogRecord } from "@opentelemetry/api-logs"
-import type { Counter, Gauge, Histogram, Span, SpanOptions, Tracer, Context, SpanContext, SpanStatus, Attributes } from "@opentelemetry/api"
+import type { Counter, Histogram, Span, SpanOptions, Tracer, Context, SpanContext, SpanStatus, Attributes } from "@opentelemetry/api"
 import { ROOT_CONTEXT, SpanStatusCode, trace } from "@opentelemetry/api"
 
 export type SpyCounter = {
@@ -9,11 +9,6 @@ export type SpyCounter = {
 }
 
 export type SpyHistogram = {
-  calls: Array<{ value: number; attrs: Record<string, unknown> }>
-  record(value: number, attrs?: Record<string, unknown>): void
-}
-
-export type SpyGauge = {
   calls: Array<{ value: number; attrs: Record<string, unknown> }>
   record(value: number, attrs?: Record<string, unknown>): void
 }
@@ -60,11 +55,6 @@ function makeCounter(): SpyCounter {
 
 function makeHistogram(): SpyHistogram {
   const spy: SpyHistogram = { calls: [], record(v, a = {}) { spy.calls.push({ value: v, attrs: a }) } }
-  return spy
-}
-
-function makeGauge(): SpyGauge {
-  const spy: SpyGauge = { calls: [], record(v, a = {}) { spy.calls.push({ value: v, attrs: a }) } }
   return spy
 }
 
@@ -143,13 +133,49 @@ export function makeTracer(): SpyTracer {
   return tracer
 }
 
+/** Builds a fresh tracing correlation state for a mock context. */
+export function makeTracingState(): TracingState {
+  return {
+    seenEvents: new Set(),
+    eventQueue: Promise.resolve(),
+    runSpans: new Map(),
+    runSpanContexts: new Map(),
+    stepSpans: new Map(),
+    activeStepSpans: new Map(),
+    stepSpanContexts: new Map(),
+    toolSpans: new Map(),
+    toolSpanContexts: new Map(),
+    subagentParents: new Map(),
+    consumedSubagentDispatches: new Set(),
+    toolMeta: new Map(),
+    stepMeta: new Map(),
+    sessionTotals: new Map(),
+    countedSessions: new Set(),
+    countedMessages: new Set(),
+    sessionProjects: new Map(),
+    sessionIdentity: new Map(),
+    stepOutputs: new Map(),
+    pendingPrompts: new Map(),
+    activePrompts: new Map(),
+    activeExecutions: new Set(),
+    pendingPermissions: new Map(),
+    activeLlm: new Map(),
+    provisionalLlm: new Map(),
+    modelContexts: new Map(),
+  }
+}
+
+/** Builds a mock OpenCode V2 event with an id, type, timestamp, and data payload. */
+export function evt(type: string, data: Record<string, unknown>, created = 1000, id = `${type}:1`): any {
+  return { id, type, created, data } as unknown as OpenCodeEvent
+}
+
 export type MockContext = {
   ctx: HandlerContext
   counters: {
     session: SpyCounter
     token: SpyCounter
     cost: SpyCounter
-    lines: SpyCounter
     commit: SpyCounter
     cache: SpyCounter
     message: SpyCounter
@@ -160,11 +186,8 @@ export type MockContext = {
   histograms: {
     tool: SpyHistogram
     sessionDuration: SpyHistogram
-  }
-  gauges: {
     sessionToken: SpyHistogram
     sessionCost: SpyHistogram
-    linesTotal: SpyGauge
   }
   logger: SpyLogger
   pluginLog: SpyPluginLog
@@ -181,7 +204,6 @@ export function makeCtx(
   const session = makeCounter()
   const token = makeCounter()
   const cost = makeCounter()
-  const lines = makeCounter()
   const commit = makeCounter()
   const cache = makeCounter()
   const message = makeCounter()
@@ -190,9 +212,8 @@ export function makeCtx(
   const subtask = makeCounter()
   const toolHistogram = makeHistogram()
   const sessionDurationHistogram = makeHistogram()
-  const sessionTokenGauge = makeHistogram()
-  const sessionCostGauge = makeHistogram()
-  const linesTotalGauge = makeGauge()
+  const sessionTokenHistogram = makeHistogram()
+  const sessionCostHistogram = makeHistogram()
   const logger = makeLogger()
   const pluginLog = makePluginLog()
   const tracer = makeTracer()
@@ -201,15 +222,13 @@ export function makeCtx(
     sessionCounter: session as unknown as Counter,
     tokenCounter: token as unknown as Counter,
     costCounter: cost as unknown as Counter,
-    linesCounter: lines as unknown as Counter,
-    linesTotalGauge: linesTotalGauge as unknown as Gauge,
     commitCounter: commit as unknown as Counter,
     toolDurationHistogram: toolHistogram as unknown as Histogram,
     cacheCounter: cache as unknown as Counter,
     sessionDurationHistogram: sessionDurationHistogram as unknown as Histogram,
     messageCounter: message as unknown as Counter,
-    sessionTokenGauge: sessionTokenGauge as unknown as Histogram,
-    sessionCostGauge: sessionCostGauge as unknown as Histogram,
+    sessionTokenHistogram: sessionTokenHistogram as unknown as Histogram,
+    sessionCostHistogram: sessionCostHistogram as unknown as Histogram,
     modelUsageCounter: modelUsage as unknown as Counter,
     retryCounter: retry as unknown as Counter,
     subtaskCounter: subtask as unknown as Counter,
@@ -223,36 +242,28 @@ export function makeCtx(
     },
     instruments,
     commonAttrs: { "project.id": projectID, ...extraCommonAttrs },
-    pendingToolSpans: new Map(),
-    pendingPermissions: new Map(),
-    sessionTotals: new Map(),
-    sessionDiffTotals: new Map(),
     disabledMetrics: new Set(disabledMetrics),
     disabledTraces: new Set(disabledTraces),
     tracer: tracer as unknown as Tracer,
     tracePrefix: "opencode.",
     rootContext: () => ROOT_CONTEXT,
-    runSpans: new Map(),
-    runSpanContexts: new Map(),
-    activeRuns: new Map(),
-    assistantRuns: new Map(),
-    pendingRuns: new Map(),
-    runInputs: new Map(),
-    sessionSpans: new Map(),
-    sessionSpanContexts: new Map(),
-    messageSpans: new Map(),
-    messageOutputs: new Map(),
-    llmRequestContexts: new Map(),
+    tracing: makeTracingState(),
     tracePropagationProviders: new Set(),
   }
 
   return {
     ctx,
-    counters: { session, token, cost, lines, commit, cache, message, modelUsage, retry, subtask },
-    histograms: { tool: toolHistogram, sessionDuration: sessionDurationHistogram },
-    gauges: { sessionToken: sessionTokenGauge, sessionCost: sessionCostGauge, linesTotal: linesTotalGauge },
+    counters: { session, token, cost, commit, cache, message, modelUsage, retry, subtask },
+    histograms: { tool: toolHistogram, sessionDuration: sessionDurationHistogram, sessionToken: sessionTokenHistogram, sessionCost: sessionCostHistogram },
     logger,
     pluginLog,
     tracer,
   }
 }
+
+/** Returns a minimal well-formed V2 token usage sample. */
+export function tokens(input = 10, output = 5, reasoning = 0, cacheRead = 0, cacheWrite = 0) {
+  return { input, output, reasoning, cache: { read: cacheRead, write: cacheWrite } }
+}
+
+export type { Span }

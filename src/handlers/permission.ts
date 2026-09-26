@@ -1,40 +1,43 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
-import type { EventPermissionUpdated, EventPermissionReplied } from "@opencode-ai/sdk"
+import type { EventOf, HandlerContext } from "../types.ts"
 import { agentAttrs, getSessionAgentMeta, setBoundedMap } from "../util.ts"
-import type { HandlerContext } from "../types.ts"
 
-/** Stores a pending permission prompt in the context map for later correlation with its reply. */
-export function handlePermissionUpdated(e: EventPermissionUpdated, ctx: HandlerContext) {
-  const perm = e.properties
-  setBoundedMap(ctx.pendingPermissions, perm.id, {
-    type: perm.type,
-    title: perm.title,
-    sessionID: perm.sessionID,
+/** Stores an answered permission prompt for correlation when the reply arrives. */
+export function handlePermissionAsked(e: EventOf<"permission.asked">, ctx: HandlerContext) {
+  const d = e.data
+  setBoundedMap(ctx.tracing.pendingPermissions, d.id, {
+    action: d.action,
+    resources: d.resources,
+    sessionID: d.sessionID,
   })
-  ctx.log("debug", "otel: permission stored", { permissionID: perm.id, sessionID: perm.sessionID, type: perm.type, title: perm.title })
+  void ctx.log("debug", "otel: permission asked", {
+    requestID: d.id,
+    sessionID: d.sessionID,
+    action: d.action,
+  })
 }
 
 /** Emits a `tool_decision` log event recording whether the permission was accepted or rejected. */
-export function handlePermissionReplied(e: EventPermissionReplied, ctx: HandlerContext) {
-  const { permissionID, sessionID, response } = e.properties
-  const pending = ctx.pendingPermissions.get(permissionID)
-  ctx.pendingPermissions.delete(permissionID)
-  const decision = response === "allow" || response === "allowAlways" ? "accept" : "reject"
-  const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
-  ctx.log("debug", "otel: tool_decision emitted", { permissionID, sessionID, decision, source: response, tool_name: pending?.title ?? "unknown" })
+export function handlePermissionReplied(e: EventOf<"permission.replied">, ctx: HandlerContext) {
+  const d = e.data
+  const pending = ctx.tracing.pendingPermissions.get(d.requestID)
+  ctx.tracing.pendingPermissions.delete(d.requestID)
+  const decision = d.reply === "reject" ? "reject" : "accept"
+  const { agentName, agentType } = getSessionAgentMeta(d.sessionID, ctx)
+
   ctx.emitLog({
     severityNumber: SeverityNumber.INFO,
     severityText: "INFO",
-    timestamp: Date.now(),
+    timestamp: e.created,
     observedTimestamp: Date.now(),
     body: "tool_decision",
     attributes: {
       "event.name": "tool_decision",
-      "session.id": sessionID,
-      tool_name: pending?.title ?? "unknown",
-      tool_type: pending?.type ?? "unknown",
+      "session.id": d.sessionID,
+      tool_name: pending?.action ?? "unknown",
+      ...(pending ? { resources: pending.resources.join(",") } : {}),
       decision,
-      source: response,
+      source: d.reply,
       ...agentAttrs(agentName, agentType),
       ...ctx.commonAttrs,
     },

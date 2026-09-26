@@ -4,6 +4,7 @@ import { OTLPLogExporter as OTLPHttpLogExporter } from "@opentelemetry/exporter-
 import { OTLPLogExporter as OTLPProtoLogExporter } from "@opentelemetry/exporter-logs-otlp-proto"
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-grpc"
 import { OTLPMetricExporter as OTLPHttpMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http"
+import { AggregationTemporality, InstrumentType } from "@opentelemetry/sdk-metrics"
 import { OTLPMetricExporter as OTLPProtoMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc"
 import { OTLPTraceExporter as OTLPHttpTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
@@ -82,6 +83,12 @@ describe("buildResource", () => {
     const resource = buildResource("0.0.1")
     expect(resource.attributes["service.name"]).toBe("my-override")
   })
+
+  test("explicit accepted attributes ignore a rejected location's environment", () => {
+    process.env["OTEL_RESOURCE_ATTRIBUTES"] = "team=rejected"
+    expect(buildResource("2.0.0", "team=accepted").attributes["team"]).toBe("accepted")
+    expect(buildResource("2.0.0", "").attributes["team"]).toBeUndefined()
+  })
 })
 
 describe("setupOtel", () => {
@@ -121,6 +128,53 @@ describe("setupOtel", () => {
     expect(exporters.metric).toBeInstanceOf(OTLPHttpMetricExporter)
     expect(exporters.log).toBeInstanceOf(OTLPHttpLogExporter)
     expect(exporters.trace).toBeInstanceOf(OTLPHttpTraceExporter)
+  })
+
+  test("uses the accepted metrics temporality rather than a rejected setup's environment", async () => {
+    const original = process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]
+    try {
+      process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = "cumulative"
+      providers = await setupOtel("http://collector:4318", "http/json", 60000, 5000, "2.0.0", undefined, undefined, "", "delta")
+      const exporter = exportersOf(providers).metric as OTLPHttpMetricExporter
+      expect(exporter.selectAggregationTemporality(InstrumentType.COUNTER)).toBe(AggregationTemporality.DELTA)
+    } finally {
+      if (original === undefined) delete process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]
+      else process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = original
+    }
+  })
+
+  test("does not send inherited OTLP credentials when the accepted setup has no headers", async () => {
+    const previous = process.env["OTEL_EXPORTER_OTLP_HEADERS"]
+    const previousMetrics = process.env["OTEL_EXPORTER_OTLP_METRICS_HEADERS"]
+    const received: Headers[] = []
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        received.push(request.headers)
+        return new Response(null, { status: 200 })
+      },
+    })
+    try {
+      process.env["OTEL_EXPORTER_OTLP_HEADERS"] = "Authorization=Bearer rejected"
+      process.env["OTEL_EXPORTER_OTLP_METRICS_HEADERS"] = "x-rejected=secret"
+      providers = await setupOtel(`http://127.0.0.1:${server.port}`, "http/json", 60000, 5000, "2.0.0")
+      providers.meterProvider.getMeter("test").createCounter("test.counter").add(1)
+      await providers.meterProvider.forceFlush()
+      expect(received.length).toBeGreaterThan(0)
+      expect(received[0]!.get("authorization")).toBeNull()
+      expect(received[0]!.get("x-rejected")).toBeNull()
+    } finally {
+      const active = providers
+      providers = undefined
+      if (active) await Promise.allSettled([
+        active.meterProvider.shutdown(), active.loggerProvider.shutdown(), active.tracerProvider.shutdown(),
+      ])
+      if (previous === undefined) delete process.env["OTEL_EXPORTER_OTLP_HEADERS"]
+      else process.env["OTEL_EXPORTER_OTLP_HEADERS"] = previous
+      if (previousMetrics === undefined) delete process.env["OTEL_EXPORTER_OTLP_METRICS_HEADERS"]
+      else process.env["OTEL_EXPORTER_OTLP_METRICS_HEADERS"] = previousMetrics
+      server.stop()
+    }
   })
 })
 
