@@ -89,9 +89,9 @@ export function ensureSession(sessionID: string, at: number, ctx: HandlerContext
   countSession(sessionID, identity?.agentType === "subagent", ctx)
   const totals: SessionTotals = {
     startMs: identity?.startMs ?? at,
-    tokens: 0,
-    cost: 0,
-    messages: 0,
+    tokens: identity?.tokens ?? 0,
+    cost: identity?.cost ?? 0,
+    messages: identity?.messages ?? 0,
     agent: identity?.agent ?? "unknown",
     agentType: identity?.agentType ?? "primary",
     ...(identity?.parentID ? { parentID: identity.parentID } : {}),
@@ -325,6 +325,15 @@ export function finalizeSession(sessionID: string, ctx: HandlerContext) {
   if (!totals) {
     sweepExecution(sessionID, ctx)
     return
+  }
+  const identity = ctx.tracing.sessionIdentity.get(sessionID)
+  if (identity) {
+    setBoundedMap(ctx.tracing.sessionIdentity, sessionID, {
+      ...identity,
+      tokens: totals.tokens,
+      cost: totals.cost,
+      messages: totals.messages,
+    })
   }
   ctx.tracing.sessionTotals.delete(sessionID)
   ctx.tracing.activeLlm.delete(sessionID)

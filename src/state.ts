@@ -61,6 +61,7 @@ export async function acquireSharedOtel(config: PluginConfig, version: string): 
         config.otlpHeaders,
         config.otlpHeadersHelper,
         config.resourceAttributes,
+        config.metricsTemporality,
       )
       const shared: SharedOtel = {
         providers,

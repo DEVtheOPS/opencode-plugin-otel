@@ -4,6 +4,7 @@ import { OTLPLogExporter as OTLPHttpLogExporter } from "@opentelemetry/exporter-
 import { OTLPLogExporter as OTLPProtoLogExporter } from "@opentelemetry/exporter-logs-otlp-proto"
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-grpc"
 import { OTLPMetricExporter as OTLPHttpMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http"
+import { AggregationTemporality, InstrumentType } from "@opentelemetry/sdk-metrics"
 import { OTLPMetricExporter as OTLPProtoMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc"
 import { OTLPTraceExporter as OTLPHttpTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
@@ -127,6 +128,19 @@ describe("setupOtel", () => {
     expect(exporters.metric).toBeInstanceOf(OTLPHttpMetricExporter)
     expect(exporters.log).toBeInstanceOf(OTLPHttpLogExporter)
     expect(exporters.trace).toBeInstanceOf(OTLPHttpTraceExporter)
+  })
+
+  test("uses the accepted metrics temporality rather than a rejected setup's environment", async () => {
+    const original = process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]
+    try {
+      process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = "cumulative"
+      providers = await setupOtel("http://collector:4318", "http/json", 60000, 5000, "2.0.0", undefined, undefined, "", "delta")
+      const exporter = exportersOf(providers).metric as OTLPHttpMetricExporter
+      expect(exporter.selectAggregationTemporality(InstrumentType.COUNTER)).toBe(AggregationTemporality.DELTA)
+    } finally {
+      if (original === undefined) delete process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]
+      else process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = original
+    }
   })
 })
 

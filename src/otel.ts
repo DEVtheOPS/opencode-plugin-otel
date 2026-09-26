@@ -8,7 +8,7 @@ import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-grpc"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc"
 import { OTLPLogExporter as OTLPHttpLogExporter } from "@opentelemetry/exporter-logs-otlp-http"
 import { OTLPLogExporter as OTLPProtoLogExporter } from "@opentelemetry/exporter-logs-otlp-proto"
-import { OTLPMetricExporter as OTLPHttpMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http"
+import { OTLPMetricExporter as OTLPHttpMetricExporter, AggregationTemporalityPreference } from "@opentelemetry/exporter-metrics-otlp-http"
 import { OTLPMetricExporter as OTLPProtoMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto"
 import { OTLPTraceExporter as OTLPHttpTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { OTLPTraceExporter as OTLPProtoTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto"
@@ -16,7 +16,7 @@ import { resourceFromAttributes } from "@opentelemetry/resources"
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions"
 import { ATTR_HOST_ARCH } from "@opentelemetry/semantic-conventions/incubating"
 import type { Instruments } from "./types.ts"
-import { parseAttributePairs } from "./config.ts"
+import { parseAttributePairs, type MetricsTemporality } from "./config.ts"
 import {
   createGrpcMetadata,
   DynamicHeaders,
@@ -65,6 +65,12 @@ export function buildHttpSignalUrl(endpoint: string, signal: "traces" | "metrics
   return url.toString()
 }
 
+function metricTemporalityPreference(value: MetricsTemporality | undefined): AggregationTemporalityPreference {
+  if (value === "delta") return AggregationTemporalityPreference.DELTA
+  if (value === "lowmemory") return AggregationTemporalityPreference.LOWMEMORY
+  return AggregationTemporalityPreference.CUMULATIVE
+}
+
 /**
  * Initialises the OTel SDK — creates a `MeterProvider`, `LoggerProvider`, and
  * `BasicTracerProvider` backed by OTLP exporters (gRPC or HTTP/protobuf)
@@ -79,10 +85,12 @@ export async function setupOtel(
   otlpHeaders?: string,
   otlpHeadersHelper?: string,
   resourceAttributes?: string,
+  metricsTemporality?: MetricsTemporality,
 ): Promise<OtelProviders> {
   const resource = buildResource(version, resourceAttributes ?? "")
   const staticHeaders = parseOtlpHeaders(otlpHeaders)
   const dynamicHeaders = new DynamicHeaders(staticHeaders, otlpHeadersHelper)
+  const temporalityPreference = metricTemporalityPreference(metricsTemporality)
   if (otlpHeadersHelper) {
     try {
       await dynamicHeaders.refresh()
@@ -91,10 +99,10 @@ export async function setupOtel(
     }
   }
   const makeMetricExporter = (headers: HeadersMap) => protocol === "http/protobuf"
-    ? new OTLPProtoMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers })
+    ? new OTLPProtoMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers, temporalityPreference })
     : protocol === "http/json"
-      ? new OTLPHttpMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers })
-      : new OTLPMetricExporter({ url: endpoint, metadata: createGrpcMetadata(headers) })
+      ? new OTLPHttpMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers, temporalityPreference })
+      : new OTLPMetricExporter({ url: endpoint, metadata: createGrpcMetadata(headers), temporalityPreference })
   const makeLogExporter = (headers: HeadersMap) => protocol === "http/protobuf"
     ? new OTLPProtoLogExporter({ url: buildHttpSignalUrl(endpoint, "logs"), headers })
     : protocol === "http/json"

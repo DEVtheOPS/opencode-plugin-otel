@@ -85,6 +85,9 @@ export type SessionIdentity = {
   agentType: SessionAgentType
   parentID?: string
   startMs: number
+  tokens?: number
+  cost?: number
+  messages?: number
 }
 
 /** Model/agent metadata for an in-flight LLM step, keyed by assistant message ID. */

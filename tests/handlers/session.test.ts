@@ -105,6 +105,21 @@ describe("handleExecutionStarted", () => {
     expect(tracer.spans.at(-1)?.parentSpan).toBe(tracer.spans[0])
   })
 
+  test("preserves cumulative totals if the next execution ends before a usage update", () => {
+    const { ctx, histograms, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1", projectID: "p" }), ctx)
+    handleUsageUpdated(evt("session.usage.updated", { sessionID: "ses_1", cost: 1.25, tokens: tokens(10, 5) }), ctx)
+    finalizeSession("ses_1", ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    handleExecutionEnded(evt("session.execution.failed", { sessionID: "ses_1", error: { type: "x", message: "y" } }), ctx, {
+      type: "failed", error: { type: "x", message: "y" },
+    })
+    finalizeSession("ses_1", ctx)
+    expect(histograms.sessionToken.calls.map((call) => call.value)).toEqual([15, 15])
+    expect(histograms.sessionCost.calls.map((call) => call.value)).toEqual([1.25, 1.25])
+    expect(tracer.spans.at(-1)?.attributes["session.total_tokens"]).toBe(15)
+  })
+
   test("retains a prompt queued during the current execution for the next run", () => {
     const { ctx, tracer } = makeCtx()
     handleSessionCreated(evt("session.created", { sessionID: "ses_1", projectID: "p" }), ctx)
