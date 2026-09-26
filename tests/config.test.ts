@@ -75,6 +75,7 @@ describe("loadConfig", () => {
     "OPENCODE_DISABLE_METRICS",
     "OPENCODE_DISABLE_LOGS",
     "OPENCODE_CAPTURE_PROMPT_IN_LOGS",
+    "OPENCODE_CAPTURE_MODEL_CONTEXT",
     "OPENCODE_DISABLE_TRACES",
     "OPENCODE_TRACE_PROPAGATION_PROVIDERS",
     "OTEL_EXPORTER_OTLP_HEADERS",
@@ -89,6 +90,7 @@ describe("loadConfig", () => {
     expect(cfg.enabled).toBe(false)
     expect(cfg.logsEnabled).toBe(true)
     expect(cfg.capturePromptInLogs).toBe(false)
+    expect(cfg.captureModelContext).toBe(false)
     expect(cfg.endpoint).toBe("http://localhost:4317")
     expect(cfg.protocol).toBe("grpc")
     expect(cfg.metricsInterval).toBe(60000)
@@ -174,6 +176,13 @@ describe("loadConfig", () => {
   test("reads OPENCODE_SPAN_ATTRIBUTES", () => {
     process.env["OPENCODE_SPAN_ATTRIBUTES"] = "team=platform,env=prod"
     expect(loadConfig().spanAttributes).toBe("team=platform,env=prod")
+  })
+
+  test("captures model-visible context only when explicitly enabled", () => {
+    expect(loadConfig().captureModelContext).toBe(false)
+    process.env["OPENCODE_CAPTURE_MODEL_CONTEXT"] = "1"
+    expect(loadConfig().captureModelContext).toBe(true)
+    expect(loadConfig({ captureModelContext: false }).captureModelContext).toBe(false)
   })
 
   test("does not set OTEL_EXPORTER_OTLP_HEADERS when OPENCODE_OTLP_HEADERS is unset", () => {

@@ -112,9 +112,11 @@ export function acquireTracingState(): TracingState {
       runSpans: new Map(),
       runSpanContexts: new Map(),
       stepSpans: new Map(),
+      activeStepSpans: new Map(),
       stepSpanContexts: new Map(),
       toolSpans: new Map(),
       toolSpanContexts: new Map(),
+      subagentParents: new Map(),
       toolMeta: new Map(),
       stepMeta: new Map(),
       sessionTotals: new Map(),
@@ -129,6 +131,7 @@ export function acquireTracingState(): TracingState {
       pendingPermissions: new Map(),
       activeLlm: new Map(),
       provisionalLlm: new Map(),
+      modelContexts: new Map(),
     }
     g[TRACING_KEY] = state
   }

@@ -46,13 +46,20 @@ export function handleToolInputStarted(e: EventOf<"session.tool.input.started">,
 export function handleToolCalled(e: EventOf<"session.tool.called">, ctx: HandlerContext) {
   const d = e.data
   const meta = ctx.tracing.toolMeta.get(d.id)
+  const isSubagent = meta?.tool === "subagent"
+  const runs = d.executed
   const { agentName, agentType } = getSessionAgentMeta(d.sessionID, ctx)
   const inputJson = safeJson(d.input)
-  if (meta && d.executed) {
-    setBoundedMap(ctx.tracing.toolMeta, d.id, { ...meta, startMs: e.created, executionStarted: true })
+  if (meta && (runs || isSubagent)) {
+    setBoundedMap(ctx.tracing.toolMeta, d.id, {
+      ...meta,
+      startMs: e.created,
+      executionStarted: runs,
+      ...(isSubagent && typeof d.input["agent"] === "string" ? { agent: d.input["agent"] } : {}),
+    })
   }
 
-  const span = d.executed && meta && isTraceEnabled("tool", ctx)
+  const span = runs && meta && isTraceEnabled("tool", ctx)
     ? ctx.tracer.startSpan(
         `${ctx.tracePrefix}tool.${meta.tool}`,
         {
@@ -86,14 +93,59 @@ export function handleToolCalled(e: EventOf<"session.tool.called">, ctx: Handler
   }
 }
 
+function startSubagentSpan(callID: string, ctx: HandlerContext) {
+  const meta = ctx.tracing.toolMeta.get(callID)
+  if (!meta || meta.tool !== "subagent") return
+  setBoundedMap(ctx.tracing.toolMeta, callID, { ...meta, executionStarted: true })
+  if (ctx.tracing.toolSpans.has(callID) || !isTraceEnabled("tool", ctx)) return
+  const { agentName, agentType } = getSessionAgentMeta(meta.sessionID, ctx)
+  const span = ctx.tracer.startSpan(
+    `${ctx.tracePrefix}tool.subagent`,
+    {
+      startTime: meta.startMs,
+      kind: SpanKind.INTERNAL,
+      attributes: {
+        [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.TOOL,
+        [SESSION_ID]: meta.sessionID,
+        [TOOL_ID]: callID,
+        [TOOL_NAME]: "subagent",
+        "subagent.agent": meta.agent ?? "unknown",
+        [AGENT_NAME]: agentName,
+        "agent.type": agentType,
+        ...ctx.commonAttrs,
+      },
+    },
+    resolveStepContext(meta.sessionID, meta.assistantMessageID, ctx),
+  )
+  setBoundedMap(ctx.tracing.toolSpans, callID, span)
+  setBoundedMap(ctx.tracing.toolSpanContexts, callID, span.spanContext())
+}
+
+function linkSubagent(callID: string, childID: unknown, ctx: HandlerContext) {
+  const meta = ctx.tracing.toolMeta.get(callID)
+  if (typeof childID !== "string" || meta?.tool !== "subagent") return
+  setBoundedMap(ctx.tracing.toolMeta, callID, { ...meta, childSessionID: childID })
+  startSubagentSpan(callID, ctx)
+  const span = ctx.tracing.toolSpans.get(callID)
+  span?.setAttribute("subagent.session_id", childID)
+  const spanContext = span?.spanContext()
+  if (spanContext) setBoundedMap(ctx.tracing.subagentParents, childID, spanContext)
+}
+
+export function handleToolProgress(e: EventOf<"session.tool.progress">, ctx: HandlerContext) {
+  linkSubagent(e.data.id, e.data.metadata["sessionID"], ctx)
+}
+
 /** Ends a successful tool call: records duration, sets output attributes, and emits `tool_result`. */
 export function handleToolSuccess(e: EventOf<"session.tool.success">, ctx: HandlerContext) {
+  linkSubagent(e.data.id, e.data.metadata?.["sessionID"], ctx)
   const output = contentText(e.data.content)
   finishTool(e.data.id, e.data.sessionID, e.created, true, e.data.executed, output, undefined, ctx)
 }
 
 /** Ends a failed tool call: records duration, sets error attributes, and emits `tool_result`. */
 export function handleToolFailed(e: EventOf<"session.tool.failed">, ctx: HandlerContext) {
+  linkSubagent(e.data.id, e.data.metadata?.["sessionID"], ctx)
   const output = contentText(e.data.content)
   finishTool(e.data.id, e.data.sessionID, e.created, false, e.data.executed, output, errorSummary(e.data.error), ctx)
 }
@@ -111,7 +163,8 @@ function finishTool(
   const meta = ctx.tracing.toolMeta.get(callID)
   ctx.tracing.toolMeta.delete(callID)
   const tool = meta?.tool ?? "unknown"
-  const start = executed && meta?.executionStarted ? meta.startMs : endMs
+  const observedExecution = executed || (tool === "subagent" && meta?.executionStarted === true)
+  const start = observedExecution && meta?.executionStarted ? meta.startMs : endMs
   const durationMs = Math.max(0, endMs - start)
   const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
   const sizeBytes = output ? Buffer.byteLength(output, "utf8") : 0
@@ -135,7 +188,7 @@ function finishTool(
     })
   }
 
-  if (executed && isMetricEnabled("tool.duration", ctx)) {
+  if (observedExecution && isMetricEnabled("tool.duration", ctx)) {
     ctx.instruments.toolDurationHistogram.record(durationMs, {
       ...ctx.commonAttrs,
       "session.id": sessionID,

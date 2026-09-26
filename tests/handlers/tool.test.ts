@@ -99,4 +99,14 @@ describe("handleToolFailed", () => {
     expect(histograms.tool.calls[0]!.value).toBe(300)
     expect(tracer.spans.find((span) => span.name === "opencode.tool.read")?.startTime).toBe(5000)
   })
+
+  test("does not create a dispatch span for an invalid subagent call without a child", () => {
+    const { ctx, tracer, histograms } = makeCtx()
+    seed(ctx)
+    handleToolInputStarted(inputStarted("call_2", "subagent"), ctx)
+    handleToolCalled(evt("session.tool.called", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_2", input: { agent: "explore" }, executed: false }), ctx)
+    handleToolFailed(evt("session.tool.failed", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_2", error: { type: "invalid", message: "missing input" }, executed: false }), ctx)
+    expect(tracer.spans.some((span) => span.name === "opencode.tool.subagent")).toBe(false)
+    expect(histograms.tool.calls).toHaveLength(0)
+  })
 })

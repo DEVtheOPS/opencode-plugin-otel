@@ -41,9 +41,9 @@ src/
 └── handlers/
     ├── session.ts        — session.created, session.inbox.enqueued, session.execution.*, retry/idle/usage
     ├── step.ts           — session.step.*, session.text.ended (LLM spans + token/cost/cache metrics)
-    ├── tool.ts           — session.tool.* (tool spans, duration, commit detection)
+    ├── tool.ts           — session.tool.* (tool spans, subagent correlation, duration, commit detection)
     ├── permission.ts     — permission.asked/replied
-    └── chat-headers.ts   — session.hook("model.request") trace propagation
+    └── chat-headers.ts   — context preview and model.request / WebSocket trace propagation
 ```
 
 ## Key conventions
@@ -57,6 +57,8 @@ src/
 - **Single source of truth for tokens/cost** — token and cost counters are incremented once per `session.step.ended`/`failed`; session totals come from `session.usage.updated` (cumulative) with a per-step fallback.
 - **Event de-duplication** — V2 may deliver the same event to multiple plugin instances; serialize shared dispatch before deduping by `event.id` via `markSeen` so later events cannot overtake an asynchronous session lookup.
 - **Session identity** — retain the agent, subagent parent, and creation time across executions, and hydrate missed `session.created` events with `ctx.session.get`.
+- **Subagent correlation** — only parent a child run under a dispatch tool span when a child session ID in tool progress/result metadata or one unambiguous live candidate identifies it; otherwise use the parent run.
+- **Model context capture** — opt-in only, text parts only, bounded; never serialize full media or structured tool payloads into span attributes.
 - **Multi-location configuration** — process-wide exporters require identical telemetry configuration; reject a conflicting setup and derive project attributes from the observed session, not the loading location.
 - **Shutdown** — providers are flushed (never shut down) on plugin cleanup and once per process on `beforeExit`. Shutting down the global OTel providers poisons them for the rest of the process.
 - **All env vars are `OPENCODE_` prefixed** — `OPENCODE_ENABLE_TELEMETRY`, `OPENCODE_OTLP_ENDPOINT`, `OPENCODE_OTLP_METRICS_INTERVAL`, `OPENCODE_OTLP_LOGS_INTERVAL`, `OPENCODE_METRIC_PREFIX`, `OPENCODE_CAPTURE_PROMPT_IN_LOGS`, `OPENCODE_OTLP_HEADERS`, `OPENCODE_RESOURCE_ATTRIBUTES`, `OPENCODE_SPAN_ATTRIBUTES`. Never use bare `OTEL_*` names for plugin config. Headers are passed directly to exporters; `loadConfig` copies `OPENCODE_RESOURCE_ATTRIBUTES` → `OTEL_RESOURCE_ATTRIBUTES` before the SDK initializes.

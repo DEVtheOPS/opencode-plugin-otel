@@ -18,7 +18,7 @@ import {
   isTraceEnabled,
   markSeen,
   modelRef,
-  resolveRunContext,
+  resolveSubagentTraceContext,
   setBoundedMap,
   totalTokens,
 } from "../util.ts"
@@ -189,7 +189,7 @@ export function handleExecutionStarted(e: EventOf<"session.execution.started">, 
 
   const isSubagent = totals?.agentType === "subagent"
   const parentCtx = isSubagent && totals?.parentID
-    ? resolveRunContext(totals.parentID, ctx)
+    ? resolveSubagentTraceContext(sessionID, totals.parentID, totals.agent, ctx)
     : ctx.rootContext()
   const promptText = pendingPrompt?.text ?? ""
 
@@ -347,6 +347,8 @@ export function finalizeSession(sessionID: string, ctx: HandlerContext) {
   }
   ctx.tracing.sessionTotals.delete(sessionID)
   ctx.tracing.activeLlm.delete(sessionID)
+  ctx.tracing.activeStepSpans.delete(sessionID)
+  ctx.tracing.modelContexts.delete(sessionID)
   ctx.tracing.activePrompts.delete(sessionID)
   ctx.tracing.activeExecutions.delete(sessionID)
 

@@ -53,9 +53,9 @@ src/
 └── handlers/
     ├── session.ts        — session.created / session.execution.* / session.status
     ├── step.ts           — session.step.* (LLM spans + token/cost metrics)
-    ├── tool.ts           — session.tool.* (tool spans, duration, commits)
+    ├── tool.ts           — session.tool.* (tool spans, subagents, duration, commits)
     ├── permission.ts     — permission.asked / permission.replied
-    └── chat-headers.ts   — model.request trace propagation
+    └── chat-headers.ts   — context preview and model.request / WebSocket propagation
 ```
 
 ## Testing locally with a collector

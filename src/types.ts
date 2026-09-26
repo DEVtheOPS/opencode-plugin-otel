@@ -105,6 +105,8 @@ export type ToolMeta = {
   startMs: number
   executionStarted?: boolean
   command?: string
+  agent?: string
+  childSessionID?: string
 }
 
 /** Live LLM request metadata used by the `model.request` trace-propagation hook. */
@@ -113,6 +115,15 @@ export type LlmRequestContext = {
   modelID: string
   providerID: string
   spanContext: SpanContext
+}
+
+/** Bounded model-visible text snapshot awaiting its matching primary request. */
+export type ModelContextSnapshot = {
+  agent: string
+  providerID: string
+  modelID: string
+  inputMessages: string
+  inputValue?: string
 }
 
 /**
@@ -140,9 +151,11 @@ export type TracingState = {
   runSpans: Map<string, Span>
   runSpanContexts: Map<string, SpanContext>
   stepSpans: Map<string, Span>
+  activeStepSpans: Map<string, Span>
   stepSpanContexts: Map<string, SpanContext>
   toolSpans: Map<string, Span>
   toolSpanContexts: Map<string, SpanContext>
+  subagentParents: Map<string, SpanContext>
   toolMeta: Map<string, ToolMeta>
   stepMeta: Map<string, StepMeta>
   sessionTotals: Map<string, SessionTotals>
@@ -157,6 +170,7 @@ export type TracingState = {
   pendingPermissions: Map<string, PendingPermission>
   activeLlm: Map<string, LlmRequestContext>
   provisionalLlm: Map<string, Span>
+  modelContexts: Map<string, ModelContextSnapshot>
 }
 
 /** Shared context threaded through every event handler. */

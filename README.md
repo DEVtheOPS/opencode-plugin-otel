@@ -24,6 +24,7 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
   - [Quick start](#quick-start)
   - [Headers and resource attributes](#headers-and-resource-attributes)
   - [Dynamic headers](#dynamic-headers)
+  - [Model-visible context capture](#model-visible-context-capture)
   - [LLM trace propagation](#llm-trace-propagation)
   - [Disabling specific metrics](#disabling-specific-metrics)
   - [Disabling OTLP logs (`OPENCODE_DISABLE_LOGS`)](#disabling-otlp-logs)
@@ -57,6 +58,10 @@ and is not an equivalent per-session total. `command.executed` instrumentation i
 replaced by successful shell-tool completion. Message/part spans are replaced by
 per-step LLM spans; completed text segments still populate `output.value` and
 `llm.output_messages`.
+
+When V2 provides an unambiguous child session ID through subagent tool progress or result metadata,
+subagent run spans nest under the dispatch tool span. Ambiguous or missed correlations fall back to
+the parent run span; a background child may outlive its already-ended dispatch tool span.
 
 ## What it instruments
 
@@ -139,6 +144,7 @@ The environment variables (set them in your shell profile — `~/.zshrc`, `~/.ba
 | `OPENCODE_DISABLE_METRICS` | *(unset)* | Comma-separated list of metric name suffixes to disable (e.g. `cache.count,session.duration`) |
 | `OPENCODE_DISABLE_LOGS` | *(unset)* | Set to any non-empty value to suppress all OTLP log events while leaving metrics and traces unchanged |
 | `OPENCODE_CAPTURE_PROMPT_IN_LOGS` | *(unset)* | Set to any non-empty value to include the full prompt text in the `prompt` attribute of `user_prompt` log events. **Log events only** — trace spans carry an observed prompt in `input.value` regardless of this flag (disable span-level capture separately via `OPENCODE_DISABLE_TRACES`). **Off by default — prompts may contain secrets or PII; enable only for trusted collectors.** |
+| `OPENCODE_CAPTURE_MODEL_CONTEXT` | *(unset)* | Set to any non-empty value to attach a bounded text-only preview of the primary model-visible context to LLM spans. Off by default; can include system instructions, earlier messages, and tool text. |
 | `OPENCODE_DISABLE_TRACES` | *(unset)* | Comma-separated list of trace types to disable (`session`, `llm`, `tool`). Use `all`, `*`, `true`, or `1` to disable every trace type |
 | `OPENCODE_OTLP_HEADERS` | *(unset)* | Comma-separated `key=value` headers added to all OTLP exports. **Keep out of version control — may contain sensitive auth tokens.** |
 | `OPENCODE_OTLP_HEADERS_HELPER` | *(unset)* | Executable script/binary that returns dynamic OTLP headers as JSON after an auth failure. Helper headers override `OPENCODE_OTLP_HEADERS`. |
@@ -181,6 +187,7 @@ Option keys mirror the resolved config and map to the environment variables:
 | `enabled` | `OPENCODE_ENABLE_TELEMETRY` |
 | `logsEnabled` | `OPENCODE_DISABLE_LOGS` (inverted) |
 | `capturePromptInLogs` | `OPENCODE_CAPTURE_PROMPT_IN_LOGS` |
+| `captureModelContext` | `OPENCODE_CAPTURE_MODEL_CONTEXT` |
 | `logLevel` | *(none — option only)*: `debug`, `info`, `warn`, `error` |
 | `endpoint` | `OPENCODE_OTLP_ENDPOINT` |
 | `protocol` | `OPENCODE_OTLP_PROTOCOL` |
@@ -258,6 +265,20 @@ For a Cloud Run collector using IAM authentication, `get-token.sh` might be `gcl
 
 If `OPENCODE_OTLP_HEADERS` is also set, helper-provided headers override static headers with the same name. Header values are never logged.
 
+### Model-visible context capture
+
+```bash
+export OPENCODE_CAPTURE_MODEL_CONTEXT=1
+```
+
+When enabled, `session.hook("context")` captures up to two system parts and the last twelve
+messages, retaining only text parts and truncating each to 1,000 characters. The matching primary
+LLM span receives this preview in `llm.input_messages` and its latest user text in `input.value`.
+Media bytes and structured tool payloads are excluded. The hook observes context at its position
+in plugin order; subsequent plugins can still change the request. This is independent of
+`OPENCODE_CAPTURE_PROMPT_IN_LOGS` and can include secrets or PII from previous messages,
+system instructions, or tool text. Use it only with a trusted collector.
+
 ### LLM trace propagation
 
 Use `OPENCODE_TRACE_PROPAGATION_PROVIDERS` to connect this plugin's LLM spans to spans emitted by an LLM gateway such as LiteLLM or vLLM. For matching provider IDs, the plugin injects the current `opencode.llm` span as the W3C `traceparent` header and includes `tracestate` when present.
@@ -271,6 +292,11 @@ export OPENCODE_TRACE_PROPAGATION_PROVIDERS="company-litellm,vllm"
 The values are opencode provider IDs, including custom names configured under the `provider` key in `opencode.json`. Propagation is disabled when the setting is unset. Use `*` only when every configured provider should receive trace context.
 
 Only W3C trace context is propagated. The plugin does not inject arbitrary headers or W3C baggage. Configure static provider-specific headers through the provider's native `options.headers` setting in `opencode.json`.
+
+For WebSocket-backed providers, the plugin also injects into V2's experimental
+`experimental.ws.handshake` hook. Changing trace headers per step can reopen a reused socket,
+so enable propagation only for providers where connected traces outweigh connection reuse.
+The hook is experimental and should be verified against your provider's WebSocket route.
 
 ### Disabling specific metrics
 

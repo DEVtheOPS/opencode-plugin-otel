@@ -20,9 +20,9 @@ import {
   handleUsageUpdated,
 } from "./handlers/session.ts"
 import { handleStepEnded, handleStepFailed, handleStepStarted, handleTextEnded } from "./handlers/step.ts"
-import { handleToolCalled, handleToolFailed, handleToolInputStarted, handleToolSuccess } from "./handlers/tool.ts"
+import { handleToolCalled, handleToolFailed, handleToolInputStarted, handleToolProgress, handleToolSuccess } from "./handlers/tool.ts"
 import { handlePermissionAsked, handlePermissionReplied } from "./handlers/permission.ts"
-import { handleModelRequest } from "./handlers/chat-headers.ts"
+import { captureModelContext, handleModelRequest } from "./handlers/chat-headers.ts"
 
 const PLUGIN_VERSION: string = (pkg as { version?: string }).version ?? "unknown"
 const EXIT_HOOK_KEY = "__opencode_plugin_otel_exit_hook__"
@@ -123,9 +123,25 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
     async (id) => ctx.session.get({ sessionID: id }),
   )
 
+  if (config.captureModelContext) {
+    await ctx.session.hook("context", async (event) => {
+      captureModelContext(event, await scoped(event.sessionID))
+    })
+  }
+
   await ctx.session.hook("model.request", async (event) => {
     await handleModelRequest(event, await scoped(event.sessionID))
   })
+
+  if (config.tracePropagationProviders.size > 0) {
+    try {
+      await ctx.session.hook("experimental.ws.handshake", async (event) => {
+        await handleModelRequest(event, await scoped(event.sessionID))
+      })
+    } catch {
+      await log("warn", "WebSocket trace propagation hook unavailable", { version: ctx.app.version })
+    }
+  }
 
   const dispatch = async (event: OpenCodeEvent): Promise<void> => {
     if (event.type === "session.created") {
@@ -199,6 +215,9 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
         break
       case "session.tool.called":
         handleToolCalled(event, eventCtx)
+        break
+      case "session.tool.progress":
+        handleToolProgress(event, eventCtx)
         break
       case "session.tool.success":
         handleToolSuccess(event, eventCtx)

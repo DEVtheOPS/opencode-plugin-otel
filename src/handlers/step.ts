@@ -25,6 +25,7 @@ import {
 } from "@arizeai/openinference-semantic-conventions"
 import type { EventOf, HandlerContext, SessionTotals } from "../types.ts"
 import { ensureSession } from "./session.ts"
+import { applyModelContext } from "./chat-headers.ts"
 import {
   agentAttrs,
   errorSummary,
@@ -121,7 +122,9 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
     resolveRunContext(d.sessionID, ctx),
   )
   if (matches) span.setAttributes(attributes)
+  applyModelContext(d.sessionID, d.agent, d.model, span, ctx)
   setBoundedMap(ctx.tracing.stepSpans, d.assistantMessageID, span)
+  setBoundedMap(ctx.tracing.activeStepSpans, d.sessionID, span)
   setBoundedMap(ctx.tracing.stepSpanContexts, d.assistantMessageID, span.spanContext())
   setBoundedMap(ctx.tracing.activeLlm, d.sessionID, {
     agent: d.agent,
@@ -309,6 +312,9 @@ function recordUsageMetrics(
 
 function cleanupStep(assistantMessageID: string, sessionID: string, ctx: HandlerContext) {
   const spanContext = ctx.tracing.stepSpanContexts.get(assistantMessageID)
+  if (spanContext && ctx.tracing.activeStepSpans.get(sessionID)?.spanContext().spanId === spanContext.spanId) {
+    ctx.tracing.activeStepSpans.delete(sessionID)
+  }
   ctx.tracing.stepSpans.delete(assistantMessageID)
   ctx.tracing.stepSpanContexts.delete(assistantMessageID)
   ctx.tracing.stepMeta.delete(assistantMessageID)
