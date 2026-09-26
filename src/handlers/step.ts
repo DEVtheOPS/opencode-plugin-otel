@@ -250,6 +250,15 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
       "agent.type": agentType,
       [LLM_FINISH_REASON]: d.finish ?? "error",
       duration_ms: durationMs,
+      ...(d.tokens ? {
+        [LLM_TOKEN_COUNT_PROMPT]: d.tokens.input,
+        [LLM_TOKEN_COUNT_COMPLETION]: d.tokens.output,
+        [LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING]: d.tokens.reasoning,
+        [LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ]: d.tokens.cache.read,
+        [LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE]: d.tokens.cache.write,
+        [LLM_TOKEN_COUNT_TOTAL]: allTokens(d.tokens),
+      } : {}),
+      ...(d.cost !== undefined ? { [LLM_COST_TOTAL]: d.cost, cost_usd: d.cost } : {}),
       ...(output ? { [OUTPUT_VALUE]: output, [OUTPUT_MIME_TYPE]: MimeType.TEXT } : {}),
     })
     span.setStatus({ code: SpanStatusCode.ERROR, message: error })

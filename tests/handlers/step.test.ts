@@ -82,6 +82,8 @@ describe("handleStepFailed", () => {
     expect(counters.token.calls.length).toBeGreaterThan(0)
     const llm = tracer.spans.find((s) => s.name === "opencode.llm")!
     expect(llm.status.code).toBe(SpanStatusCode.ERROR)
+    expect(llm.attributes["llm.token_count.total"]).toBe(15)
+    expect(llm.attributes["llm.cost.total"]).toBe(0.1)
     expect(logger.records.at(-1)!.body).toBe("api_error")
     expect(logger.records.at(-1)!.attributes?.["error"]).toBe("ProviderError: boom")
     expect(counters.message.calls).toHaveLength(1)
