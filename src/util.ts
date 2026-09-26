@@ -1,5 +1,5 @@
 import { trace, type Context } from "@opentelemetry/api"
-import { MAX_PENDING, type HandlerContext, type SessionAgentType, type TracingState } from "./types.ts"
+import { MAX_PENDING, MAX_SEEN_EVENTS, type HandlerContext, type SessionAgentType, type TracingState } from "./types.ts"
 
 const GEN_AI_PROVIDER_NAMES: Readonly<Record<string, string>> = {
   "amazon-bedrock": "aws.bedrock",
@@ -62,7 +62,7 @@ export function setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V) {
 
 /** Records an event id for de-duplication, evicting the oldest entry when at capacity. */
 export function markSeen(seen: TracingState["seenEvents"], id: string): void {
-  if (!seen.has(id) && seen.size >= MAX_PENDING * 20) {
+  if (!seen.has(id) && seen.size >= MAX_SEEN_EVENTS) {
     const [first] = seen.values()
     if (first !== undefined) seen.delete(first)
   }
@@ -122,4 +122,21 @@ export function getSessionAgentMeta(
     agentName: totals?.agent ?? "unknown",
     agentType: totals?.agentType ?? "unknown",
   }
+}
+
+export async function contextForSession(
+  sessionID: string,
+  ctx: HandlerContext,
+  projectForSession: (sessionID: string) => Promise<string>,
+): Promise<HandlerContext> {
+  let projectID = ctx.tracing.sessionProjects.get(sessionID)
+  if (!projectID) {
+    try {
+      projectID = await projectForSession(sessionID)
+      setBoundedMap(ctx.tracing.sessionProjects, sessionID, projectID)
+    } catch {
+      return ctx
+    }
+  }
+  return { ...ctx, commonAttrs: { ...ctx.commonAttrs, "project.id": projectID } }
 }

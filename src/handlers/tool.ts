@@ -63,11 +63,10 @@ export function handleToolInputStarted(e: EventOf<"session.tool.input.started">,
   setBoundedMap(ctx.tracing.toolSpanContexts, d.id, span.spanContext())
 }
 
-/** Attaches the tool input to the span and detects `git commit` invocations in shell tools. */
+/** Attaches tool input to the span and retains the command for terminal commit detection. */
 export function handleToolCalled(e: EventOf<"session.tool.called">, ctx: HandlerContext) {
   const d = e.data
   const meta = ctx.tracing.toolMeta.get(d.id)
-  const tool = meta?.tool ?? "unknown"
   const { agentName, agentType } = getSessionAgentMeta(d.sessionID, ctx)
   const inputJson = safeJson(d.input)
 
@@ -82,39 +81,21 @@ export function handleToolCalled(e: EventOf<"session.tool.called">, ctx: Handler
     })
   }
 
-  if (SHELL_TOOL_RE.test(tool)) {
-    const command = typeof d.input["command"] === "string" ? d.input["command"] : inputJson
-    if (GIT_COMMIT_RE.test(command)) {
-      if (isMetricEnabled("commit.count", ctx)) {
-        ctx.instruments.commitCounter.add(1, { ...ctx.commonAttrs, "session.id": d.sessionID })
-      }
-      ctx.emitLog({
-        severityNumber: SeverityNumber.INFO,
-        severityText: "INFO",
-        timestamp: e.created,
-        observedTimestamp: Date.now(),
-        body: "commit",
-        attributes: {
-          "event.name": "commit",
-          "session.id": d.sessionID,
-          ...agentAttrs(agentName, agentType),
-          ...ctx.commonAttrs,
-        },
-      })
-    }
+  if (meta && typeof d.input["command"] === "string") {
+    setBoundedMap(ctx.tracing.toolMeta, d.id, { ...meta, command: d.input["command"] })
   }
 }
 
 /** Ends a successful tool call: records duration, sets output attributes, and emits `tool_result`. */
 export function handleToolSuccess(e: EventOf<"session.tool.success">, ctx: HandlerContext) {
   const output = contentText(e.data.content)
-  finishTool(e.data.id, e.data.sessionID, e.created, true, output, undefined, ctx)
+  finishTool(e.data.id, e.data.sessionID, e.created, true, e.data.executed, output, undefined, ctx)
 }
 
 /** Ends a failed tool call: records duration, sets error attributes, and emits `tool_result`. */
 export function handleToolFailed(e: EventOf<"session.tool.failed">, ctx: HandlerContext) {
   const output = contentText(e.data.content)
-  finishTool(e.data.id, e.data.sessionID, e.created, false, output, errorSummary(e.data.error), ctx)
+  finishTool(e.data.id, e.data.sessionID, e.created, false, e.data.executed, output, errorSummary(e.data.error), ctx)
 }
 
 function finishTool(
@@ -122,6 +103,7 @@ function finishTool(
   sessionID: string,
   endMs: number,
   success: boolean,
+  executed: boolean,
   output: string,
   error: string | undefined,
   ctx: HandlerContext,
@@ -133,6 +115,25 @@ function finishTool(
   const durationMs = Math.max(0, endMs - start)
   const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
   const sizeBytes = output ? Buffer.byteLength(output, "utf8") : 0
+
+  if (success && executed && meta?.command && SHELL_TOOL_RE.test(tool) && GIT_COMMIT_RE.test(meta.command)) {
+    if (isMetricEnabled("commit.count", ctx)) {
+      ctx.instruments.commitCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID })
+    }
+    ctx.emitLog({
+      severityNumber: SeverityNumber.INFO,
+      severityText: "INFO",
+      timestamp: endMs,
+      observedTimestamp: Date.now(),
+      body: "commit",
+      attributes: {
+        "event.name": "commit",
+        "session.id": sessionID,
+        ...agentAttrs(agentName, agentType),
+        ...ctx.commonAttrs,
+      },
+    })
+  }
 
   if (isMetricEnabled("tool.duration", ctx)) {
     ctx.instruments.toolDurationHistogram.record(durationMs, {

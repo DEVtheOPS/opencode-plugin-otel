@@ -12,9 +12,10 @@ export type ModelRequestEvent = {
 
 /** Injects the active LLM span's W3C trace context into outbound model requests. */
 export function handleModelRequest(event: ModelRequestEvent, ctx: HandlerContext): void {
+  if (event.kind !== "primary") return
   const providerID = event.model.providerID
   if (!ctx.tracePropagationProviders.has(providerID) && !ctx.tracePropagationProviders.has("*")) return
   const active = ctx.tracing.activeLlm.get(event.sessionID)
-  if (!active || active.providerID !== providerID) return
+  if (!active || active.providerID !== providerID || active.modelID !== event.model.id || active.agent !== event.agent) return
   injectTraceContext(active.spanContext, event.headers)
 }

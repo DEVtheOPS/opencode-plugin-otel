@@ -10,7 +10,7 @@ Always run after making changes:
 bun run typecheck
 ```
 
-There is no build step during development. TypeScript source files are published directly and loaded natively by Bun.
+There is no build step during local development. TypeScript source files are loaded natively by Bun; the published package is bundled by `prepack`.
 
 ## Testing
 
@@ -29,7 +29,7 @@ released from the `1.x` line; do not add V1 compatibility shims to `main`.
 ```text
 src/
 ├── index.ts              — V2 plugin default export (id + setup)
-├── plugin.ts             — setup(): config, hooks, event subscription, dispatch
+├── plugin.ts             — setup(): config, model.request hook, event subscription, dispatch
 ├── state.ts              — per-process shared OTel SDK + tracing state (globalThis)
 ├── types.ts              — Shared types (OpenCodeEvent, HandlerContext, TracingState, etc.)
 ├── config.ts             — Env/option config loading and log level resolution
@@ -39,8 +39,8 @@ src/
 ├── trace-context.ts      — W3C trace-context inject/extract
 ├── util.ts               — errorSummary, setBoundedMap, context resolution, attrs
 └── handlers/
-    ├── session.ts        — session.created, session.execution.*, session.status/idle, usage
-    ├── step.ts           — session.step.* (LLM spans + token/cost/cache metrics)
+    ├── session.ts        — session.created, session.inbox.enqueued, session.execution.*, retry/idle/usage
+    ├── step.ts           — session.step.*, session.text.ended (LLM spans + token/cost/cache metrics)
     ├── tool.ts           — session.tool.* (tool spans, duration, commit detection)
     ├── permission.ts     — permission.asked/replied
     └── chat-headers.ts   — session.hook("model.request") trace propagation
@@ -56,6 +56,7 @@ src/
 - **`setBoundedMap` / `markSeen`** — always use these for correlation maps (`toolMeta`, `stepMeta`, `pendingPrompts`, `pendingPermissions`, `seenEvents`) to prevent unbounded growth.
 - **Single source of truth for tokens/cost** — token and cost counters are incremented once per `session.step.ended`/`failed`; session totals come from `session.usage.updated` (cumulative) with a per-step fallback.
 - **Event de-duplication** — V2 may deliver the same event to multiple plugin instances; dedupe by `event.id` via `markSeen`.
+- **Multi-location configuration** — process-wide exporters require identical telemetry configuration; reject a conflicting setup and derive project attributes from the observed session, not the loading location.
 - **Shutdown** — providers are flushed (never shut down) on plugin cleanup and once per process on `beforeExit`. Shutting down the global OTel providers poisons them for the rest of the process.
 - **All env vars are `OPENCODE_` prefixed** — `OPENCODE_ENABLE_TELEMETRY`, `OPENCODE_OTLP_ENDPOINT`, `OPENCODE_OTLP_METRICS_INTERVAL`, `OPENCODE_OTLP_LOGS_INTERVAL`, `OPENCODE_METRIC_PREFIX`, `OPENCODE_CAPTURE_PROMPT_IN_LOGS`, `OPENCODE_OTLP_HEADERS`, `OPENCODE_RESOURCE_ATTRIBUTES`, `OPENCODE_SPAN_ATTRIBUTES`. Never use bare `OTEL_*` names for plugin config. `loadConfig` copies `OPENCODE_OTLP_HEADERS` → `OTEL_EXPORTER_OTLP_HEADERS` and `OPENCODE_RESOURCE_ATTRIBUTES` → `OTEL_RESOURCE_ATTRIBUTES` before the SDK initializes.
 - **`OPENCODE_ENABLE_TELEMETRY`** — all OTel instrumentation is gated on this env var (or the `enabled` plugin option). The plugin always loads regardless.

@@ -170,7 +170,7 @@ export function createInstruments(prefix: string): Instruments {
     }),
     cacheCounter: meter.createCounter(`${prefix}cache.count`, {
       unit: "{request}",
-      description: "Token cache activity (cacheRead/cacheCreation) per completed assistant message",
+      description: "Token cache activity (cacheRead/cacheCreation) per completed LLM step",
     }),
     sessionDurationHistogram: meter.createHistogram(`${prefix}session.duration`, {
       unit: "ms",
@@ -197,11 +197,11 @@ export function createInstruments(prefix: string): Instruments {
     }),
     retryCounter: meter.createCounter(`${prefix}retry.count`, {
       unit: "{retry}",
-      description: "Number of API retries observed via session.status events",
+      description: "Number of API retries observed via session.retry.scheduled events",
     }),
     subtaskCounter: meter.createCounter(`${prefix}subtask.count`, {
       unit: "{subtask}",
-      description: "Number of sub-agent invocations observed via subtask message parts",
+      description: "Number of sub-agent sessions observed via session.created with a parentID",
     }),
   }
 }

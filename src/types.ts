@@ -95,6 +95,7 @@ export type ToolMeta = {
   assistantMessageID: string
   tool: string
   startMs: number
+  command?: string
 }
 
 /** Live LLM request metadata used by the `model.request` trace-propagation hook. */
@@ -116,6 +117,7 @@ export type SharedOtel = {
   logger: Logger
   tracer: Tracer
   refs: number
+  configKey: string
 }
 
 /**
@@ -136,6 +138,8 @@ export type TracingState = {
   sessionTotals: Map<string, SessionTotals>
   countedSessions: Set<string>
   countedMessages: Set<string>
+  sessionProjects: Map<string, string>
+  stepOutputs: Map<string, Map<number, string>>
   pendingPrompts: Map<string, PendingPrompt>
   pendingPermissions: Map<string, PendingPermission>
   activeLlm: Map<string, LlmRequestContext>

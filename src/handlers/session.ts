@@ -16,6 +16,7 @@ import {
   errorSummary,
   isMetricEnabled,
   isTraceEnabled,
+  markSeen,
   modelRef,
   resolveRunContext,
   setBoundedMap,
@@ -24,9 +25,38 @@ import {
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 
+export function handlePromptEnqueued(e: EventOf<"session.inbox.enqueued">, ctx: HandlerContext, capturePrompt: boolean) {
+  const { sessionID, inboxID, item } = e.data
+  if (item.type !== "user") return
+  const parts = [item.payload.text]
+  for (const file of item.payload.files ?? []) parts.push(file.name ?? (file.source.type === "uri" ? file.source.uri : ""))
+  for (const agent of item.payload.agents ?? []) parts.push(agent.name)
+  for (const skill of item.payload.skills ?? []) parts.push(skill.name)
+  const text = parts.filter(Boolean).join("\n")
+  setBoundedMap(ctx.tracing.pendingPrompts, sessionID, { text, startMs: e.created })
+  const totals = ctx.tracing.sessionTotals.get(sessionID)
+  ctx.emitLog({
+    severityNumber: SeverityNumber.INFO,
+    severityText: "INFO",
+    timestamp: e.created,
+    observedTimestamp: Date.now(),
+    body: "user_prompt",
+    attributes: {
+      "event.name": "user_prompt",
+      "session.id": sessionID,
+      "message.id": inboxID,
+      ...(totals ? agentAttrs(totals.agent, totals.agentType) : {}),
+      prompt_length: text.length,
+      ...(capturePrompt ? { prompt: text } : {}),
+      delivery: item.delivery,
+      ...ctx.commonAttrs,
+    },
+  })
+}
+
 function countSession(sessionID: string, isSubagent: boolean, ctx: HandlerContext) {
   if (ctx.tracing.countedSessions.has(sessionID)) return
-  ctx.tracing.countedSessions.add(sessionID)
+  markSeen(ctx.tracing.countedSessions, sessionID)
   if (isMetricEnabled("session.count", ctx)) {
     ctx.instruments.sessionCounter.add(1, {
       ...ctx.commonAttrs,
@@ -65,12 +95,29 @@ export function handleSessionCreated(e: EventOf<"session.created">, ctx: Handler
   const agentType: SessionAgentType = isSubagent ? "subagent" : "primary"
   const agent = d.agent ?? "unknown"
 
+  setBoundedMap(ctx.tracing.sessionProjects, d.sessionID, d.projectID)
   countSession(d.sessionID, isSubagent, ctx)
   if (isSubagent && isMetricEnabled("subtask.count", ctx)) {
     ctx.instruments.subtaskCounter.add(1, {
       ...ctx.commonAttrs,
       "session.id": d.sessionID,
       "agent.type": "subagent",
+    })
+  }
+  if (isSubagent) {
+    ctx.emitLog({
+      severityNumber: SeverityNumber.INFO,
+      severityText: "INFO",
+      timestamp: e.created,
+      observedTimestamp: Date.now(),
+      body: "subtask_invoked",
+      attributes: {
+        "event.name": "subtask_invoked",
+        "session.id": d.sessionID,
+        "parent.session.id": d.parentID,
+        ...agentAttrs(agent, agentType),
+        ...ctx.commonAttrs,
+      },
     })
   }
 
@@ -208,17 +255,20 @@ export function handleExecutionEnded(
   }
 }
 
-/** Handles `session.status`: counts retries and finalizes the session on idle. */
+/** Handles `session.status` idle and retry diagnostics. */
 export function handleSessionStatus(e: EventOf<"session.status">, ctx: HandlerContext) {
   const { sessionID, status } = e.data
   if (status.type === "retry") {
-    if (isMetricEnabled("retry.count", ctx)) {
-      ctx.instruments.retryCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID })
-    }
     void ctx.log("debug", "otel: retry scheduled", { sessionID, attempt: status.attempt })
     return
   }
   if (status.type === "idle") finalizeSession(sessionID, ctx)
+}
+
+export function handleRetryScheduled(e: EventOf<"session.retry.scheduled">, ctx: HandlerContext) {
+  if (isMetricEnabled("retry.count", ctx)) {
+    ctx.instruments.retryCounter.add(1, { ...ctx.commonAttrs, "session.id": e.data.sessionID })
+  }
 }
 
 /** Handles the deprecated `session.idle` event as an idle finalization signal. */
@@ -314,6 +364,7 @@ function sweepExecution(sessionID: string, ctx: HandlerContext) {
     ctx.tracing.stepSpans.delete(messageID)
     ctx.tracing.stepSpanContexts.delete(messageID)
     ctx.tracing.stepMeta.delete(messageID)
+    ctx.tracing.stepOutputs.delete(messageID)
   }
   for (const [id, perm] of ctx.tracing.pendingPermissions) {
     if (perm.sessionID === sessionID) ctx.tracing.pendingPermissions.delete(id)

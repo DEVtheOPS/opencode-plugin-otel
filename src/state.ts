@@ -1,5 +1,6 @@
 import { trace } from "@opentelemetry/api"
 import { logs } from "@opentelemetry/api-logs"
+import { createHash } from "node:crypto"
 import { createInstruments, forceFlushOtel, setupOtel } from "./otel.ts"
 import type { PluginConfig } from "./config.ts"
 import type { SharedOtel, TracingState } from "./types.ts"
@@ -14,6 +15,17 @@ function globals(): Globals {
   return globalThis as unknown as Globals
 }
 
+export function configKey(config: PluginConfig): string {
+  const normalized = JSON.stringify({
+    ...config,
+    disabledMetrics: [...config.disabledMetrics].sort(),
+    disabledTraces: [...config.disabledTraces].sort(),
+    tracePropagationProviders: [...config.tracePropagationProviders].sort(),
+    logLevel: undefined,
+  })
+  return createHash("sha256").update(normalized).digest("hex")
+}
+
 /**
  * Returns the process-wide shared OTel SDK instance, creating it on first use.
  * OpenCode may load one plugin instance per location, but `setGlobalMeterProvider`
@@ -22,8 +34,10 @@ function globals(): Globals {
  */
 export async function acquireSharedOtel(config: PluginConfig, version: string): Promise<SharedOtel> {
   const g = globals()
+  const key = configKey(config)
   const existing = g[OTEL_KEY] as SharedOtel | undefined
   if (existing) {
+    if (existing.configKey !== key) throw new Error("OpenCode OTel plugin instances must use identical telemetry configuration within one process")
     existing.refs += 1
     return existing
   }
@@ -45,14 +59,15 @@ export async function acquireSharedOtel(config: PluginConfig, version: string): 
         logger: logs.getLogger("com.opencode"),
         tracer: trace.getTracer("com.opencode"),
         refs: 0,
+        configKey: key,
       }
       g[OTEL_KEY] = shared
-      g[OTEL_PENDING_KEY] = undefined
       return shared
-    })()
+    })().finally(() => { g[OTEL_PENDING_KEY] = undefined })
   }
 
   const shared = await (g[OTEL_PENDING_KEY] as Promise<SharedOtel>)
+  if (shared.configKey !== key) throw new Error("OpenCode OTel plugin instances must use identical telemetry configuration within one process")
   shared.refs += 1
   return shared
 }
@@ -93,6 +108,8 @@ export function acquireTracingState(): TracingState {
       sessionTotals: new Map(),
       countedSessions: new Set(),
       countedMessages: new Set(),
+      sessionProjects: new Map(),
+      stepOutputs: new Map(),
       pendingPrompts: new Map(),
       pendingPermissions: new Map(),
       activeLlm: new Map(),

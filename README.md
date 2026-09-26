@@ -42,16 +42,21 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 | `2.x` (`main`) | V2 (`>=2`) | `plugins` | default export `{ id, setup }` |
 | `1.x` (`v1` branch) | V1 | `plugin` | named `OtelPlugin` export |
 
-OpenCode V2 replaced the coarse V1 event stream (`message.updated`, `message.part.updated`,
-`permission.*`, `command.executed`, `session.diff`) with a granular taxonomy
+OpenCode V2 replaced the coarse V1 message events (`message.updated`, `message.part.updated`)
+and removed `command.executed` and `session.diff` from the plugin event stream. It provides
+`permission.asked` / `permission.replied` in place of V1's `permission.updated` / `permission.replied`,
+plus a granular session taxonomy
 (`session.execution.*`, `session.step.*`, `session.tool.*`, `session.usage.updated`,
 `session.retry.scheduled`). This plugin consumes the V2 stream directly, which produces more
 accurate LLM and tool span timings than the V1 implementation.
 
-**Signals not available in V2:** the `lines_of_code.count` / `lines_of_code.total` metrics relied on the
-V1 `session.diff` event and are not emitted (the V2 plugin context does not expose a session diff).
-`command.executed`-based instrumentation is also gone; git commit detection is preserved by inspecting
-shell tool input. Message/part spans are replaced by richer per-step LLM spans.
+**V1 signal parity:** `lines_of_code.count` / `lines_of_code.total` relied on the V1
+`session.diff` event and are not emitted. The V2 client has a session-diff endpoint,
+but the V2 plugin context does not expose it; the VCS diff API is repository-scoped
+and is not an equivalent per-session total. `command.executed` instrumentation is
+replaced by successful shell-tool completion. Message/part spans are replaced by
+per-step LLM spans; completed text segments still populate `output.value` and
+`llm.output_messages`.
 
 ## What it instruments
 
@@ -59,18 +64,18 @@ shell tool input. Message/part spans are replaced by richer per-step LLM spans.
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `opencode.session.count` | Counter | Incremented on each `session.created` event |
+| `opencode.session.count` | Counter | Incremented on `session.created`, or lazily when a pre-existing session is first observed |
 | `opencode.token.usage` | Counter | Per token type: `input`, `output`, `reasoning`, `cacheRead`, `cacheCreation` (per `session.step.ended`) |
 | `opencode.cost.usage` | Counter | USD cost per completed LLM step |
-| `opencode.commit.count` | Counter | Git commits detected via shell tool input |
+| `opencode.commit.count` | Counter | `git commit` commands observed in successful, executed shell-tool calls; Git's resulting repository state is not verified |
 | `opencode.tool.duration` | Histogram | Tool execution time in milliseconds |
 | `opencode.cache.count` | Counter | Cache activity per step: `type=cacheRead` or `type=cacheCreation` |
-| `opencode.session.duration` | Histogram | Session duration from created to idle in milliseconds |
-| `opencode.message.count` | Counter | Completed assistant messages per session |
+| `opencode.session.duration` | Histogram | Observed duration from session creation (or first observation) to execution end / idle in milliseconds |
+| `opencode.message.count` | Counter | Assistant messages with a completed or failed LLM step |
 | `opencode.session.token.total` | Histogram | Total tokens consumed per session, recorded when an execution ends |
 | `opencode.session.cost.total` | Histogram | Total cost per session in USD, recorded when an execution ends |
 | `opencode.model.usage` | Counter | Messages per model and provider |
-| `opencode.retry.count` | Counter | API retries observed via `session.retry.scheduled` / `session.status` |
+| `opencode.retry.count` | Counter | API retries observed via durable `session.retry.scheduled` events |
 | `opencode.subtask.count` | Counter | Sub-agent sessions observed via `session.created` with a `parentID` |
 
 ### Log events
@@ -80,12 +85,13 @@ shell tool input. Message/part spans are replaced by richer per-step LLM spans.
 | `session.created` | Session started |
 | `session.idle` | Session went idle (includes total tokens, cost, messages) |
 | `session.error` | Execution failed |
-| `user_prompt` | User sent a message (includes `prompt_length`, `delivery`; also `prompt` when `OPENCODE_CAPTURE_PROMPT_IN_LOGS` is set) |
+| `user_prompt` | User prompt durably admitted via `session.inbox.enqueued` (includes `prompt_length`, `delivery`; also `prompt` when `OPENCODE_CAPTURE_PROMPT_IN_LOGS` is set) |
 | `api_request` | Completed LLM step (tokens, cost) |
 | `api_error` | Failed LLM step (error summary) |
 | `tool_result` | Tool completed or errored (duration, success, output size) |
 | `tool_decision` | Permission prompt answered (accept/reject) |
 | `commit` | Git commit detected |
+| `subtask_invoked` | Sub-agent session created (agent and parent session ID) |
 
 ## Installation
 
@@ -98,18 +104,26 @@ Add the plugin to your opencode config at `~/.config/opencode/opencode.json`:
 }
 ```
 
-Or point directly at a local checkout for development:
+For local development, install dependencies with `bun install` in the checkout and
+create `.opencode/plugins/otel/index.ts` in the project where OpenCode runs:
 
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": [{ "package": "/path/to/opencode-plugin-otel/src/index.ts" }]
-}
+```ts
+export { default } from "/path/to/opencode-plugin-otel/src/index.ts"
 ```
+
+OpenCode V2 discovers this directory automatically. On OpenCode `2.0.1`, a
+`plugins` package entry pointing directly to an absolute `.ts` file is rejected;
+the package loader expects a directory.
 
 ## Configuration
 
 The plugin reads its settings from `OPENCODE_*` environment variables and/or from inline [plugin options](#plugin-options-opencodejson) in `opencode.json`. When both are present, an option wins over the matching environment variable, which wins over the built-in default.
+
+When OpenCode loads multiple locations in one process, all enabled instances must
+use identical telemetry configuration. A conflicting endpoint, authentication,
+resource attribute, metric prefix, or signal option fails setup rather than
+exporting one location's data using another location's settings. Event attributes
+use the observed session's project ID when available.
 
 The environment variables (set them in your shell profile — `~/.zshrc`, `~/.bashrc`, etc.):
 
@@ -123,7 +137,7 @@ The environment variables (set them in your shell profile — `~/.zshrc`, `~/.ba
 | `OPENCODE_METRIC_PREFIX` | `opencode.` | Prefix for all metric names (e.g. set to `claude_code.` for Claude Code dashboard compatibility) |
 | `OPENCODE_DISABLE_METRICS` | *(unset)* | Comma-separated list of metric name suffixes to disable (e.g. `cache.count,session.duration`) |
 | `OPENCODE_DISABLE_LOGS` | *(unset)* | Set to any non-empty value to suppress all OTLP log events while leaving metrics and traces unchanged |
-| `OPENCODE_CAPTURE_PROMPT_IN_LOGS` | *(unset)* | Set to any non-empty value to include the full prompt text in the `prompt` attribute of `user_prompt` log events. **Log events only** — trace spans always carry the prompt in `input.value` regardless of this flag (disable span-level capture separately via `OPENCODE_DISABLE_TRACES`). **Off by default — prompts may contain secrets or PII; enable only for trusted collectors.** |
+| `OPENCODE_CAPTURE_PROMPT_IN_LOGS` | *(unset)* | Set to any non-empty value to include the full prompt text in the `prompt` attribute of `user_prompt` log events. **Log events only** — trace spans carry an observed prompt in `input.value` regardless of this flag (disable span-level capture separately via `OPENCODE_DISABLE_TRACES`). **Off by default — prompts may contain secrets or PII; enable only for trusted collectors.** |
 | `OPENCODE_DISABLE_TRACES` | *(unset)* | Comma-separated list of trace types to disable (`session`, `llm`, `tool`). Use `all`, `*`, `true`, or `1` to disable every trace type |
 | `OPENCODE_OTLP_HEADERS` | *(unset)* | Comma-separated `key=value` headers added to all OTLP exports. **Keep out of version control — may contain sensitive auth tokens.** |
 | `OPENCODE_OTLP_HEADERS_HELPER` | *(unset)* | Executable script/binary that returns dynamic OTLP headers as JSON after an auth failure. Helper headers override `OPENCODE_OTLP_HEADERS`. |
@@ -246,6 +260,8 @@ If `OPENCODE_OTLP_HEADERS` is also set, helper-provided headers override static 
 ### LLM trace propagation
 
 Use `OPENCODE_TRACE_PROPAGATION_PROVIDERS` to connect this plugin's LLM spans to spans emitted by an LLM gateway such as LiteLLM or vLLM. For matching provider IDs, the plugin injects the current `opencode.llm` span as the W3C `traceparent` header and includes `tracestate` when present.
+
+Propagation is limited to primary agent-loop requests whose provider, model, and agent match the active LLM step; title, compaction, and transient generation requests are not parented to that step.
 
 ```bash
 export OPENCODE_TRACE_PROPAGATION_PROVIDERS="company-litellm,vllm"

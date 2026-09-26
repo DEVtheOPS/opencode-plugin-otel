@@ -4,9 +4,11 @@ import {
   finalizeSession,
   handleExecutionEnded,
   handleExecutionStarted,
+  handlePromptEnqueued,
   handleSessionCreated,
   handleSessionIdle,
   handleSessionStatus,
+  handleRetryScheduled,
   handleUsageUpdated,
 } from "../../src/handlers/session.ts"
 import { makeCtx, evt, tokens } from "../helpers.ts"
@@ -30,6 +32,30 @@ describe("handleSessionCreated", () => {
     expect(counters.subtask.calls).toHaveLength(1)
     expect(ctx.tracing.sessionTotals.get("sub_1")!.parentID).toBe("ses_1")
     expect(logger.records[0]!.attributes?.["agent.name"]).toBe("explore")
+    expect(logger.records.some((record) => record.body === "subtask_invoked")).toBe(true)
+  })
+})
+
+describe("handlePromptEnqueued", () => {
+  test("logs admitted user prompts and stores their text for spans", () => {
+    const { ctx, logger } = makeCtx()
+    handlePromptEnqueued(evt("session.inbox.enqueued", {
+      sessionID: "ses_1",
+      inboxID: "msg_1",
+      item: { type: "user", payload: { text: "hello", files: [], agents: [], skills: [] }, delivery: "queue" },
+    }), ctx, false)
+    expect(logger.records[0]!.body).toBe("user_prompt")
+    expect(logger.records[0]!.attributes?.["delivery"]).toBe("queue")
+    expect(logger.records[0]!.attributes?.["prompt"]).toBeUndefined()
+    expect(ctx.tracing.pendingPrompts.get("ses_1")!.text).toBe("hello")
+  })
+
+  test("skips non-user inbox items", () => {
+    const { ctx, logger } = makeCtx()
+    handlePromptEnqueued(evt("session.inbox.enqueued", {
+      sessionID: "ses_1", inboxID: "msg_2", item: { type: "synthetic", payload: { text: "hidden" }, delivery: "steer" },
+    }), ctx, true)
+    expect(logger.records).toHaveLength(0)
   })
 })
 
@@ -95,9 +121,11 @@ describe("handleExecutionEnded", () => {
 })
 
 describe("handleSessionStatus", () => {
-  test("counts retries", () => {
+  test("counts durable retry events once rather than retry status", () => {
     const { ctx, counters } = makeCtx()
     handleSessionStatus(evt("session.status", { sessionID: "ses_1", status: { type: "retry", attempt: 1, message: "m", next: 2 } }), ctx)
+    expect(counters.retry.calls).toHaveLength(0)
+    handleRetryScheduled(evt("session.retry.scheduled", { sessionID: "ses_1", assistantMessageID: "m", attempt: 1, at: 2, error: { type: "x", message: "y" } }), ctx)
     expect(counters.retry.calls).toHaveLength(1)
   })
 

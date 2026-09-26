@@ -1,5 +1,4 @@
 import { ROOT_CONTEXT } from "@opentelemetry/api"
-import { SeverityNumber } from "@opentelemetry/api-logs"
 import pkg from "../package.json" with { type: "json" }
 import { loadConfig, parseAttributePairs, resolveHelperPath, resolveLogLevel, type OtelPluginOptions } from "./config.ts"
 import { probeEndpoint } from "./probe.ts"
@@ -7,16 +6,19 @@ import { forceFlushOtel } from "./otel.ts"
 import { remoteParentContext } from "./trace-context.ts"
 import { acquireSharedOtel, acquireTracingState, flushSharedOtel, releaseSharedOtel } from "./state.ts"
 import { LEVELS, type HandlerContext, type Level, type OpenCodeContext, type OpenCodeEvent } from "./types.ts"
-import { agentAttrs, markSeen, setBoundedMap } from "./util.ts"
+import { contextForSession, markSeen, setBoundedMap } from "./util.ts"
 import {
+  finalizeSession,
   handleExecutionEnded,
   handleExecutionStarted,
+  handlePromptEnqueued,
   handleSessionCreated,
   handleSessionIdle,
+  handleRetryScheduled,
   handleSessionStatus,
   handleUsageUpdated,
 } from "./handlers/session.ts"
-import { handleStepEnded, handleStepFailed, handleStepStarted } from "./handlers/step.ts"
+import { handleStepEnded, handleStepFailed, handleStepStarted, handleTextEnded } from "./handlers/step.ts"
 import { handleToolCalled, handleToolFailed, handleToolInputStarted, handleToolSuccess } from "./handlers/tool.ts"
 import { handlePermissionAsked, handlePermissionReplied } from "./handlers/permission.ts"
 import { handleModelRequest } from "./handlers/chat-headers.ts"
@@ -96,10 +98,7 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
     log,
     emitLog,
     instruments: shared.instruments,
-    commonAttrs: {
-      ...parseAttributePairs(config.spanAttributes),
-      "project.id": ctx.location.project.id,
-    } as const,
+    commonAttrs: parseAttributePairs(config.spanAttributes),
     disabledMetrics: config.disabledMetrics,
     disabledTraces: config.disabledTraces,
     tracer: shared.tracer,
@@ -116,93 +115,91 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
     await log("info", "prompt-in-logs capture enabled - full prompt text emitted in the `prompt` attribute of user_prompt log events")
   }
 
-  await ctx.session.hook("prompt", (event) => {
-    const prompt = event.prompt
-    const parts = [prompt.text]
-    for (const file of prompt.files ?? []) parts.push(file.name ?? file.uri)
-    for (const agent of prompt.agents ?? []) parts.push(agent.name)
-    for (const skill of prompt.skills ?? []) parts.push(skill.id)
-    const text = parts.filter(Boolean).join("\n")
-    setBoundedMap(tracing.pendingPrompts, event.sessionID, { text, startMs: Date.now() })
-    const totals = tracing.sessionTotals.get(event.sessionID)
-    emitLog({
-      severityNumber: SeverityNumber.INFO,
-      severityText: "INFO",
-      timestamp: Date.now(),
-      observedTimestamp: Date.now(),
-      body: "user_prompt",
-      attributes: {
-        "event.name": "user_prompt",
-        "session.id": event.sessionID,
-        ...(totals ? agentAttrs(totals.agent, totals.agentType) : {}),
-        prompt_length: text.length,
-        ...(config.capturePromptInLogs ? { prompt: text } : {}),
-        delivery: event.delivery,
-        ...hctx.commonAttrs,
-      },
-    })
-  })
+  const scoped = (sessionID: string) => contextForSession(
+    sessionID,
+    hctx,
+    async (id) => (await ctx.session.get({ sessionID: id })).projectID,
+  )
 
   await ctx.session.hook("model.request", (event) => {
     handleModelRequest(event, hctx)
   })
 
   const dispatch = async (event: OpenCodeEvent): Promise<void> => {
+    if (event.type === "session.created") {
+      setBoundedMap(tracing.sessionProjects, event.data.sessionID, event.data.projectID)
+    }
+    const sessionID = "sessionID" in event.data && typeof event.data.sessionID === "string"
+      ? event.data.sessionID
+      : undefined
+    const eventCtx = sessionID ? await scoped(sessionID) : hctx
     switch (event.type) {
       case "session.created":
-        handleSessionCreated(event, hctx)
+        handleSessionCreated(event, eventCtx)
+        break
+      case "session.inbox.enqueued":
+        handlePromptEnqueued(event, eventCtx, config.capturePromptInLogs)
         break
       case "session.execution.started":
-        handleExecutionStarted(event, hctx)
+        handleExecutionStarted(event, eventCtx)
         break
       case "session.execution.succeeded":
-        handleExecutionEnded(event, hctx, { type: "succeeded" })
+        handleExecutionEnded(event, eventCtx, { type: "succeeded" })
+        finalizeSession(event.data.sessionID, eventCtx)
         await forceFlushOtel(shared.providers)
         break
       case "session.execution.failed":
-        handleExecutionEnded(event, hctx, { type: "failed", error: event.data.error })
+        handleExecutionEnded(event, eventCtx, { type: "failed", error: event.data.error })
+        finalizeSession(event.data.sessionID, eventCtx)
         await forceFlushOtel(shared.providers)
         break
       case "session.execution.interrupted":
-        handleExecutionEnded(event, hctx, { type: "interrupted", reason: event.data.reason })
+        handleExecutionEnded(event, eventCtx, { type: "interrupted", reason: event.data.reason })
+        finalizeSession(event.data.sessionID, eventCtx)
         await forceFlushOtel(shared.providers)
         break
       case "session.status":
-        handleSessionStatus(event, hctx)
+        handleSessionStatus(event, eventCtx)
         break
       case "session.idle":
-        handleSessionIdle(event, hctx)
+        handleSessionIdle(event, eventCtx)
         await forceFlushOtel(shared.providers)
         break
       case "session.usage.updated":
-        handleUsageUpdated(event, hctx)
+        handleUsageUpdated(event, eventCtx)
+        break
+      case "session.retry.scheduled":
+        handleRetryScheduled(event, eventCtx)
         break
       case "session.step.started":
-        handleStepStarted(event, hctx)
+        handleStepStarted(event, eventCtx)
+        break
+      case "session.text.ended":
+        handleTextEnded(event, eventCtx)
         break
       case "session.step.ended":
-        handleStepEnded(event, hctx)
+        handleStepEnded(event, eventCtx)
         break
       case "session.step.failed":
-        handleStepFailed(event, hctx)
+        handleStepFailed(event, eventCtx)
         break
       case "session.tool.input.started":
-        handleToolInputStarted(event, hctx)
+        handleToolInputStarted(event, eventCtx)
         break
       case "session.tool.called":
-        handleToolCalled(event, hctx)
+        handleToolCalled(event, eventCtx)
         break
       case "session.tool.success":
-        handleToolSuccess(event, hctx)
+        handleToolSuccess(event, eventCtx)
         break
       case "session.tool.failed":
-        handleToolFailed(event, hctx)
+        handleToolFailed(event, eventCtx)
         break
       case "permission.asked":
-        handlePermissionAsked(event, hctx)
+        handlePermissionAsked(event, eventCtx)
         break
       case "permission.replied":
-        handlePermissionReplied(event, hctx)
+        handlePermissionReplied(event, eventCtx)
         break
       default:
         break
@@ -215,7 +212,14 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
       for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
         if (tracing.seenEvents.has(event.id)) continue
         markSeen(tracing.seenEvents, event.id)
-        await dispatch(event)
+        try {
+          await dispatch(event)
+        } catch (err) {
+          await log("error", "otel: failed to handle event", {
+            type: event.type,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
       }
     } catch (err) {
       if (!controller.signal.aborted) {

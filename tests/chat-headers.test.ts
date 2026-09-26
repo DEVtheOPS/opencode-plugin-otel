@@ -34,4 +34,13 @@ describe("handleModelRequest", () => {
     handleModelRequest({ sessionID: "ses_1", agent: "build", model: { providerID: "vllm", id: "m" }, kind: "primary", headers }, ctx)
     expect(headers["traceparent"]).toBeDefined()
   })
+
+  test("does not propagate a primary step into an auxiliary model request", () => {
+    const { ctx } = makeCtx()
+    ctx.tracePropagationProviders.add("*")
+    ctx.tracing.activeLlm.set("ses_1", { agent: "build", modelID: "m", providerID: "vllm", spanContext: SPAN_CONTEXT })
+    const headers: Record<string, string> = {}
+    handleModelRequest({ sessionID: "ses_1", agent: "build", model: { providerID: "vllm", id: "m" }, kind: "title", headers }, ctx)
+    expect(headers["traceparent"]).toBeUndefined()
+  })
 })

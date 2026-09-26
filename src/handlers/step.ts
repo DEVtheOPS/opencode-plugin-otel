@@ -18,6 +18,8 @@ import {
   LLM_TOKEN_COUNT_TOTAL,
   MimeType,
   OpenInferenceSpanKind,
+  OUTPUT_MIME_TYPE,
+  OUTPUT_VALUE,
   SemanticConventions,
   SESSION_ID,
 } from "@arizeai/openinference-semantic-conventions"
@@ -29,6 +31,7 @@ import {
   genAiProviderName,
   isMetricEnabled,
   isTraceEnabled,
+  markSeen,
   resolveRunContext,
   setBoundedMap,
 } from "../util.ts"
@@ -118,6 +121,31 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
   })
 }
 
+export function handleTextEnded(e: EventOf<"session.text.ended">, ctx: HandlerContext) {
+  const { assistantMessageID, ordinal, text } = e.data
+  const output = ctx.tracing.stepOutputs.get(assistantMessageID) ?? new Map<number, string>()
+  if (output.size < 32 || output.has(ordinal)) output.set(ordinal, text.slice(0, 64_000))
+  setBoundedMap(ctx.tracing.stepOutputs, assistantMessageID, output)
+}
+
+function countMessage(messageID: string, sessionID: string, modelID: string, providerID: string, agent: string, ctx: HandlerContext): boolean {
+  if (ctx.tracing.countedMessages.has(messageID)) return false
+  markSeen(ctx.tracing.countedMessages, messageID)
+  if (isMetricEnabled("message.count", ctx)) {
+    ctx.instruments.messageCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent })
+  }
+  if (isMetricEnabled("model.usage", ctx)) {
+    ctx.instruments.modelUsageCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, provider: providerID, agent })
+  }
+  return true
+}
+
+function outputText(messageID: string, ctx: HandlerContext): string | undefined {
+  const output = ctx.tracing.stepOutputs.get(messageID)
+  if (!output) return undefined
+  return [...output].sort(([a], [b]) => a - b).map(([, text]) => text).join("\n").slice(0, 64_000)
+}
+
 /** Records token/cost/cache metrics for a completed step and emits an `api_request` log. */
 export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerContext) {
   const d = e.data
@@ -129,26 +157,12 @@ export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerCo
   const providerID = meta?.providerID ?? "unknown"
 
   recordUsageMetrics(d.sessionID, modelID, agent, d.tokens, d.cost, ctx)
-  const firstStep = !ctx.tracing.countedMessages.has(d.assistantMessageID)
-  if (firstStep) {
-    ctx.tracing.countedMessages.add(d.assistantMessageID)
-    if (isMetricEnabled("message.count", ctx)) {
-      ctx.instruments.messageCounter.add(1, { ...ctx.commonAttrs, "session.id": d.sessionID, model: modelID, agent })
-    }
-    if (isMetricEnabled("model.usage", ctx)) {
-      ctx.instruments.modelUsageCounter.add(1, {
-        ...ctx.commonAttrs,
-        "session.id": d.sessionID,
-        model: modelID,
-        provider: providerID,
-        agent,
-      })
-    }
-  }
+  const firstStep = countMessage(d.assistantMessageID, d.sessionID, modelID, providerID, agent, ctx)
   accumulateTotals(d.sessionID, allTokens(d.tokens), d.cost, firstStep, ctx)
 
   const span = ctx.tracing.stepSpans.get(d.assistantMessageID)
   if (span) {
+    const output = outputText(d.assistantMessageID, ctx)
     span.setAttributes({
       [AGENT_NAME]: agent,
       "agent.type": agentType,
@@ -161,6 +175,11 @@ export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerCo
       [LLM_FINISH_REASON]: d.finish,
       [LLM_COST_TOTAL]: d.cost,
       cost_usd: d.cost,
+      ...(output ? {
+        [OUTPUT_VALUE]: output,
+        [OUTPUT_MIME_TYPE]: MimeType.TEXT,
+        [LLM_OUTPUT_MESSAGES]: JSON.stringify([{ role: "assistant", content: output }]),
+      } : {}),
     })
     span.setStatus({ code: SpanStatusCode.OK })
     span.end(e.created)
@@ -202,17 +221,19 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
   const providerID = meta?.providerID ?? "unknown"
   const error = errorSummary(d.error)
 
-  if (d.tokens) recordUsageMetrics(d.sessionID, modelID, agent, d.tokens, d.cost ?? 0, ctx)
-  if (!ctx.tracing.countedMessages.has(d.assistantMessageID)) {
-    ctx.tracing.countedMessages.add(d.assistantMessageID)
-    accumulateTotals(d.sessionID, allTokens(d.tokens), d.cost ?? 0, true, ctx)
-  } else {
-    accumulateTotals(d.sessionID, allTokens(d.tokens), d.cost ?? 0, false, ctx)
-  }
+  recordUsageMetrics(d.sessionID, modelID, agent, d.tokens, d.cost, ctx)
+  const firstStep = countMessage(d.assistantMessageID, d.sessionID, modelID, providerID, agent, ctx)
+  accumulateTotals(d.sessionID, allTokens(d.tokens), d.cost ?? 0, firstStep, ctx)
 
   const span = ctx.tracing.stepSpans.get(d.assistantMessageID)
   if (span) {
-    span.setAttributes({ [AGENT_NAME]: agent, "agent.type": agentType, [LLM_FINISH_REASON]: d.finish ?? "error" })
+    const output = outputText(d.assistantMessageID, ctx)
+    span.setAttributes({
+      [AGENT_NAME]: agent,
+      "agent.type": agentType,
+      [LLM_FINISH_REASON]: d.finish ?? "error",
+      ...(output ? { [OUTPUT_VALUE]: output, [OUTPUT_MIME_TYPE]: MimeType.TEXT } : {}),
+    })
     span.setStatus({ code: SpanStatusCode.ERROR, message: error })
     span.end(e.created)
   }
@@ -242,12 +263,11 @@ function recordUsageMetrics(
   modelID: string,
   agent: string,
   tokens: { input: number; output: number; reasoning: number; cache: { read: number; write: number } } | undefined,
-  cost: number,
+  cost: number | undefined,
   ctx: HandlerContext,
 ) {
-  if (!tokens) return
   const base = { ...ctx.commonAttrs, "session.id": sessionID, model: modelID, agent }
-  if (isMetricEnabled("token.usage", ctx)) {
+  if (tokens && isMetricEnabled("token.usage", ctx)) {
     const { tokenCounter } = ctx.instruments
     tokenCounter.add(tokens.input, { ...base, type: "input" })
     tokenCounter.add(tokens.output, { ...base, type: "output" })
@@ -255,10 +275,10 @@ function recordUsageMetrics(
     tokenCounter.add(tokens.cache.read, { ...base, type: "cacheRead" })
     tokenCounter.add(tokens.cache.write, { ...base, type: "cacheCreation" })
   }
-  if (isMetricEnabled("cost.usage", ctx)) {
+  if (cost !== undefined && isMetricEnabled("cost.usage", ctx)) {
     ctx.instruments.costCounter.add(cost, base)
   }
-  if (isMetricEnabled("cache.count", ctx)) {
+  if (tokens && isMetricEnabled("cache.count", ctx)) {
     if (tokens.cache.read > 0) ctx.instruments.cacheCounter.add(1, { ...base, type: "cacheRead" })
     if (tokens.cache.write > 0) ctx.instruments.cacheCounter.add(1, { ...base, type: "cacheCreation" })
   }
@@ -276,4 +296,5 @@ function cleanupStep(assistantMessageID: string, sessionID: string, ctx: Handler
   ctx.tracing.stepSpanContexts.delete(assistantMessageID)
   ctx.tracing.stepMeta.delete(assistantMessageID)
   ctx.tracing.activeLlm.delete(sessionID)
+  ctx.tracing.stepOutputs.delete(assistantMessageID)
 }

@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test"
 import { SpanStatusCode } from "@opentelemetry/api"
-import { handleStepEnded, handleStepFailed, handleStepStarted } from "../../src/handlers/step.ts"
+import { handleStepEnded, handleStepFailed, handleStepStarted, handleTextEnded } from "../../src/handlers/step.ts"
 import { handleExecutionStarted, handleSessionCreated } from "../../src/handlers/session.ts"
 import { makeCtx, evt, tokens } from "../helpers.ts"
 
@@ -38,6 +38,8 @@ describe("handleStepEnded", () => {
     const { ctx, tracer, counters, logger } = makeCtx()
     seedSession(ctx)
     handleStepStarted(stepStarted(), ctx)
+    handleTextEnded(evt("session.text.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 1, text: "world" }), ctx)
+    handleTextEnded(evt("session.text.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 0, text: "hello" }), ctx)
     handleStepEnded(
       evt("session.step.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", finish: "stop", cost: 0.25, tokens: tokens(10, 5, 2, 3, 0) }, 2000),
       ctx,
@@ -53,6 +55,8 @@ describe("handleStepEnded", () => {
     expect(llm.ended).toBe(true)
     expect(llm.status.code).toBe(SpanStatusCode.OK)
     expect(llm.attributes["llm.token_count.total"]).toBe(20)
+    expect(llm.attributes["output.value"]).toBe("hello\nworld")
+    expect(llm.attributes["llm.output_messages"]).toBe('[{"role":"assistant","content":"hello\\nworld"}]')
   })
 
   test("counts a message once across multiple steps", () => {
@@ -80,5 +84,13 @@ describe("handleStepFailed", () => {
     expect(llm.status.code).toBe(SpanStatusCode.ERROR)
     expect(logger.records.at(-1)!.body).toBe("api_error")
     expect(logger.records.at(-1)!.attributes?.["error"]).toBe("ProviderError: boom")
+    expect(counters.message.calls).toHaveLength(1)
+    expect(counters.modelUsage.calls).toHaveLength(1)
+  })
+
+  test("records a failed step cost even when token usage is absent", () => {
+    const { ctx, counters } = makeCtx()
+    handleStepFailed(evt("session.step.failed", { sessionID: "s", assistantMessageID: "m", error: { type: "x", message: "y" }, cost: 2 }), ctx)
+    expect(counters.cost.calls.map((call) => call.value)).toEqual([2])
   })
 })
