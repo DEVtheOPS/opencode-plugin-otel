@@ -89,10 +89,13 @@ export async function consumeEvents<T extends { id: string }>(
   onError: (event: T, error: unknown) => Promise<void>,
 ): Promise<void> {
   let last = Promise.resolve()
-  for await (const event of events) {
-    last = enqueueEvent(state, event.id, () => dispatch(event)).catch((error) => onError(event, error))
+  try {
+    for await (const event of events) {
+      last = enqueueEvent(state, event.id, () => dispatch(event)).catch((error) => onError(event, error))
+    }
+  } finally {
+    await last
   }
-  await last
 }
 
 /**

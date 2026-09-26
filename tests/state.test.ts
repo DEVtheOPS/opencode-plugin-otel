@@ -100,6 +100,29 @@ describe("multi-location telemetry", () => {
     expect(headers["traceparent"]).not.toContain("b7ad6b7169203331")
   })
 
+  test("drains a queued handler even when the subscription iterator throws", async () => {
+    const { ctx } = makeCtx()
+    let release!: () => void
+    let started!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const entered = new Promise<void>((resolve) => { started = resolve })
+    async function* events() {
+      yield { id: "step.started" }
+      throw new Error("stream failed")
+    }
+    let finished = false
+    const running = consumeEvents(events(), ctx.tracing, async () => {
+      started()
+      await gate
+      finished = true
+    }, async () => {})
+    await entered
+    expect(finished).toBe(false)
+    release()
+    await expect(running).rejects.toThrow("stream failed")
+    expect(finished).toBe(true)
+  })
+
   test("does not block the shared event queue on a pending exporter flush", async () => {
     const { ctx } = makeCtx()
     let release!: () => void

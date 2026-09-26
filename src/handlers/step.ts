@@ -73,6 +73,7 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
   const agentType = totals.agentType
   setBoundedMap(ctx.tracing.stepMeta, d.assistantMessageID, {
     sessionID: d.sessionID,
+    startMs: d.started ?? e.created,
     agent: d.agent,
     agentType,
     modelID: d.model.id,
@@ -164,6 +165,7 @@ export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerCo
   const agentType = meta?.agentType ?? sessionTotals?.agentType ?? "unknown"
   const modelID = meta?.modelID ?? "unknown"
   const providerID = meta?.providerID ?? "unknown"
+  const durationMs = Math.max(0, e.created - (meta?.startMs ?? e.created))
 
   recordUsageMetrics(d.sessionID, modelID, agent, d.tokens, d.cost, ctx)
   const firstStep = countMessage(d.assistantMessageID, d.sessionID, modelID, providerID, agent, ctx)
@@ -184,6 +186,7 @@ export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerCo
       [LLM_FINISH_REASON]: d.finish,
       [LLM_COST_TOTAL]: d.cost,
       cost_usd: d.cost,
+      duration_ms: durationMs,
       ...(output ? {
         [OUTPUT_VALUE]: output,
         [OUTPUT_MIME_TYPE]: MimeType.TEXT,
@@ -209,6 +212,7 @@ export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerCo
       "gen_ai.provider.name": genAiProviderName(providerID),
       ...agentAttrs(agent, agentType),
       cost_usd: d.cost,
+      duration_ms: durationMs,
       input_tokens: d.tokens.input,
       output_tokens: d.tokens.output,
       reasoning_tokens: d.tokens.reasoning,
@@ -229,6 +233,7 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
   const modelID = meta?.modelID ?? "unknown"
   const providerID = meta?.providerID ?? "unknown"
   const error = errorSummary(d.error)
+  const durationMs = Math.max(0, e.created - (meta?.startMs ?? e.created))
 
   recordUsageMetrics(d.sessionID, modelID, agent, d.tokens, d.cost, ctx)
   const firstStep = countMessage(d.assistantMessageID, d.sessionID, modelID, providerID, agent, ctx)
@@ -241,6 +246,7 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
       [AGENT_NAME]: agent,
       "agent.type": agentType,
       [LLM_FINISH_REASON]: d.finish ?? "error",
+      duration_ms: durationMs,
       ...(output ? { [OUTPUT_VALUE]: output, [OUTPUT_MIME_TYPE]: MimeType.TEXT } : {}),
     })
     span.setStatus({ code: SpanStatusCode.ERROR, message: error })
@@ -262,6 +268,7 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
       "gen_ai.provider.name": genAiProviderName(providerID),
       ...agentAttrs(agent, agentType),
       error,
+      duration_ms: durationMs,
       ...ctx.commonAttrs,
     },
   })

@@ -94,3 +94,17 @@ describe("handleStepFailed", () => {
     expect(counters.cost.calls.map((call) => call.value)).toEqual([2])
   })
 })
+
+describe("API log durations", () => {
+  test("records request and error latency without LLM traces", () => {
+    const { ctx, logger, tracer } = makeCtx("proj_test", [], ["llm"])
+    seedSession(ctx)
+    handleStepStarted(stepStarted("ses_1", "msg_1"), ctx)
+    handleStepEnded(evt("session.step.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", finish: "stop", cost: 0.1, tokens: tokens() }, 2000), ctx)
+    handleStepStarted(stepStarted("ses_1", "msg_2"), ctx)
+    handleStepFailed(evt("session.step.failed", { sessionID: "ses_1", assistantMessageID: "msg_2", error: { type: "x", message: "y" } }, 2400), ctx)
+    expect(logger.records.find((record) => record.body === "api_request")?.attributes?.["duration_ms"]).toBe(500)
+    expect(logger.records.find((record) => record.body === "api_error")?.attributes?.["duration_ms"]).toBe(900)
+    expect(tracer.spans.some((span) => span.name === "opencode.llm")).toBe(false)
+  })
+})

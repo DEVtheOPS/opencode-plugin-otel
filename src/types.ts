@@ -90,6 +90,7 @@ export type SessionIdentity = {
 /** Model/agent metadata for an in-flight LLM step, keyed by assistant message ID. */
 export type StepMeta = {
   sessionID: string
+  startMs: number
   agent: string
   agentType: SessionAgentType | "unknown"
   modelID: string
