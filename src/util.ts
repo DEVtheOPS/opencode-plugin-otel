@@ -1,5 +1,7 @@
 import { trace, type Context } from "@opentelemetry/api"
-import { MAX_PENDING, MAX_SEEN_EVENTS, type HandlerContext, type SessionAgentType, type TracingState } from "./types.ts"
+import { MAX_PENDING, type HandlerContext, type SessionAgentType, type TracingState } from "./types.ts"
+
+const MAX_SEEN_EVENTS = 10_000
 
 const GEN_AI_PROVIDER_NAMES: Readonly<Record<string, string>> = {
   "amazon-bedrock": "aws.bedrock",
@@ -77,6 +79,20 @@ export function enqueueEvent(state: TracingState, id: string, handle: () => Prom
   })
   state.eventQueue = task.catch(() => {})
   return task
+}
+
+/** Enqueues subscription events without blocking the reader while preserving shared dispatch order. */
+export async function consumeEvents<T extends { id: string }>(
+  events: AsyncIterable<T>,
+  state: TracingState,
+  dispatch: (event: T) => Promise<void>,
+  onError: (event: T, error: unknown) => Promise<void>,
+): Promise<void> {
+  let last = Promise.resolve()
+  for await (const event of events) {
+    last = enqueueEvent(state, event.id, () => dispatch(event)).catch((error) => onError(event, error))
+  }
+  await last
 }
 
 /**

@@ -6,11 +6,12 @@ import { forceFlushOtel } from "./otel.ts"
 import { remoteParentContext } from "./trace-context.ts"
 import { acquireSharedOtel, acquireTracingState, createFlushScheduler, flushSharedOtel, releaseSharedOtel } from "./state.ts"
 import { LEVELS, type HandlerContext, type Level, type OpenCodeContext, type OpenCodeEvent } from "./types.ts"
-import { contextForSession, enqueueEvent, setBoundedMap } from "./util.ts"
+import { consumeEvents, contextForSession, setBoundedMap } from "./util.ts"
 import {
   finalizeSession,
   handleExecutionEnded,
   handleExecutionStarted,
+  handleAgentSelected,
   handlePromptEnqueued,
   handleSessionCreated,
   handleSessionIdle,
@@ -144,6 +145,9 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
       case "session.created":
         handleSessionCreated(event, eventCtx)
         break
+      case "session.agent.selected":
+        handleAgentSelected(event, eventCtx)
+        break
       case "session.inbox.enqueued":
         handlePromptEnqueued(event, eventCtx, config.capturePromptInLogs)
         break
@@ -214,26 +218,23 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
   }
 
   const controller = new AbortController()
-  const running = (async () => {
-    try {
-      for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
-        try {
-          await enqueueEvent(tracing, event.id, () => dispatch(event))
-        } catch (err) {
-          await log("error", "otel: failed to handle event", {
-            type: event.type,
-            error: err instanceof Error ? err.message : String(err),
-          })
-        }
-      }
-    } catch (err) {
+  const running = consumeEvents(
+    ctx.event.subscribe({ signal: controller.signal }),
+    tracing,
+    dispatch,
+    async (event, err) => {
+      await log("error", "otel: failed to handle event", {
+        type: event.type,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    },
+  ).catch(async (err) => {
       if (!controller.signal.aborted) {
         await log("error", "otel: event subscription ended", {
           error: err instanceof Error ? err.message : String(err),
         })
       }
-    }
-  })()
+    })
 
   return async () => {
     controller.abort()

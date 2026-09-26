@@ -12,9 +12,6 @@ export type Level = keyof typeof LEVELS
 /** Maximum number of entries kept in bounded correlation maps. */
 export const MAX_PENDING = 500
 
-/** Maximum number of event ids retained for cross-instance de-duplication. */
-export const MAX_SEEN_EVENTS = 10_000
-
 /** The OpenCode V2 plugin context passed to `setup`. */
 export type OpenCodeContext = Plugin.Context
 

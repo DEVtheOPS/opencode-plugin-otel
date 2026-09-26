@@ -26,6 +26,7 @@ export function configKey(config: PluginConfig): string {
   return createHash("sha256").update(normalized).digest("hex")
 }
 
+/** Schedules exporter flushes outside event dispatch and drains them during cleanup. */
 export function createFlushScheduler(flush: () => Promise<void>) {
   let pending = Promise.resolve()
   return {

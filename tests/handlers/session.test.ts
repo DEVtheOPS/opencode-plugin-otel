@@ -4,6 +4,7 @@ import {
   finalizeSession,
   handleExecutionEnded,
   handleExecutionStarted,
+  handleAgentSelected,
   handlePromptEnqueued,
   handleSessionCreated,
   handleSessionIdle,
@@ -103,6 +104,17 @@ describe("handleExecutionStarted", () => {
     expect(ctx.tracing.sessionTotals.get("sub")?.agentType).toBe("subagent")
     expect(ctx.tracing.sessionTotals.get("sub")?.agent).toBe("explore")
     expect(tracer.spans.at(-1)?.parentSpan).toBe(tracer.spans[0])
+  })
+
+  test("retains an agent selection through finalization and the next execution", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1", projectID: "p", agent: "build" }), ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    handleAgentSelected(evt("session.agent.selected", { sessionID: "ses_1", agent: "explore" }), ctx)
+    handleExecutionEnded(evt("session.execution.succeeded", { sessionID: "ses_1" }), ctx, { type: "succeeded" })
+    finalizeSession("ses_1", ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    expect(tracer.spans.at(-1)?.attributes["agent.name"]).toBe("explore")
   })
 
   test("preserves cumulative totals if the next execution ends before a usage update", () => {

@@ -167,6 +167,14 @@ export function handleSessionCreated(e: EventOf<"session.created">, ctx: Handler
   void ctx.log("info", "otel: session.created", { sessionID: d.sessionID, isSubagent })
 }
 
+export function handleAgentSelected(e: EventOf<"session.agent.selected">, ctx: HandlerContext) {
+  const { sessionID, agent } = e.data
+  const identity = ctx.tracing.sessionIdentity.get(sessionID)
+  if (identity) setBoundedMap(ctx.tracing.sessionIdentity, sessionID, { ...identity, agent })
+  const totals = ctx.tracing.sessionTotals.get(sessionID)
+  if (totals) setBoundedMap(ctx.tracing.sessionTotals, sessionID, { ...totals, agent })
+}
+
 /** Starts the root run span for a single execution (user turn), keyed by session id. */
 export function handleExecutionStarted(e: EventOf<"session.execution.started">, ctx: HandlerContext) {
   const sessionID = e.data.sessionID
@@ -330,6 +338,8 @@ export function finalizeSession(sessionID: string, ctx: HandlerContext) {
   if (identity) {
     setBoundedMap(ctx.tracing.sessionIdentity, sessionID, {
       ...identity,
+      agent: totals.agent,
+      agentType: totals.agentType,
       tokens: totals.tokens,
       cost: totals.cost,
       messages: totals.messages,

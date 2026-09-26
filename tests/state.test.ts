@@ -2,9 +2,10 @@ import { describe, test, expect } from "bun:test"
 import { loadConfig } from "../src/config.ts"
 import { acquireSharedOtel, configKey, createFlushScheduler } from "../src/state.ts"
 import { makeCtx } from "./helpers.ts"
-import { contextForSession, enqueueEvent, markSeen } from "../src/util.ts"
+import { consumeEvents, contextForSession, enqueueEvent, markSeen } from "../src/util.ts"
 import type { HandlerContext } from "../src/types.ts"
 import { handleExecutionStarted } from "../src/handlers/session.ts"
+import { handleModelRequest } from "../src/handlers/chat-headers.ts"
 import { evt } from "./helpers.ts"
 
 describe("multi-location telemetry", () => {
@@ -67,6 +68,36 @@ describe("multi-location telemetry", () => {
     release()
     await Promise.all([started, duplicate, ended])
     expect(order).toEqual(["start", "end"])
+  })
+
+  test("drains buffered step events before a concurrent model request uses their context", async () => {
+    const { ctx } = makeCtx()
+    ctx.tracePropagationProviders.add("*")
+    ctx.tracing.activeLlm.set("s", {
+      agent: "build", modelID: "m", providerID: "vllm",
+      spanContext: { traceId: "0af7651916cd43dd8448eb211c80319c", spanId: "b7ad6b7169203331", traceFlags: 1 },
+    })
+    let release!: () => void
+    let queued!: () => void
+    const lookup = new Promise<void>((resolve) => { release = resolve })
+    const bothQueued = new Promise<void>((resolve) => { queued = resolve })
+    async function* events() {
+      yield { id: "step.started" }
+      yield { id: "step.ended" }
+      queued()
+    }
+    const processing = consumeEvents(events(), ctx.tracing, async (event) => {
+      if (event.id === "step.started") await lookup
+      else ctx.tracing.activeLlm.delete("s")
+    }, async () => {})
+    await bothQueued
+    const headers: Record<string, string> = {}
+    const request = handleModelRequest({ sessionID: "s", agent: "build", model: { providerID: "vllm", id: "m" }, kind: "primary", headers }, ctx)
+    expect(headers["traceparent"]).toBeUndefined()
+    release()
+    await Promise.all([processing, request])
+    expect(headers["traceparent"]).toBeDefined()
+    expect(headers["traceparent"]).not.toContain("b7ad6b7169203331")
   })
 
   test("does not block the shared event queue on a pending exporter flush", async () => {
