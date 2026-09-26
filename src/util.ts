@@ -144,13 +144,20 @@ export function resolveStepContext(sessionID: string, assistantMessageID: string
 /** Resolves a child run under its correlated dispatch tool, falling back to the parent run. */
 export function resolveSubagentTraceContext(sessionID: string, parentID: string, agent: string, ctx: HandlerContext): Context {
   const exact = ctx.tracing.subagentParents.get(sessionID)
-  if (exact) return trace.setSpanContext(ctx.rootContext(), exact)
+  if (exact) {
+    ctx.tracing.subagentParents.delete(sessionID)
+    markSeen(ctx.tracing.consumedSubagentDispatches, exact.callID)
+    return trace.setSpanContext(ctx.rootContext(), exact.spanContext)
+  }
   const candidates = [...ctx.tracing.toolMeta]
     .filter(([id, meta]) => meta.sessionID === parentID && meta.tool === "subagent"
       && (!meta.childSessionID || meta.childSessionID === sessionID)
+      && !ctx.tracing.consumedSubagentDispatches.has(id)
       && (!meta.agent || agent === "unknown" || meta.agent === agent) && ctx.tracing.toolSpans.has(id))
   if (candidates.length === 1) {
-    const span = ctx.tracing.toolSpans.get(candidates[0]![0])!
+    const callID = candidates[0]![0]
+    markSeen(ctx.tracing.consumedSubagentDispatches, callID)
+    const span = ctx.tracing.toolSpans.get(callID)!
     return trace.setSpan(ctx.rootContext(), span)
   }
   return resolveRunContext(parentID, ctx)

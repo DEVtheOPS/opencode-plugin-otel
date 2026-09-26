@@ -237,6 +237,11 @@ export function handleExecutionEnded(
   const sessionID = e.data.sessionID
   const totals = ctx.tracing.sessionTotals.get(sessionID)
   ctx.tracing.activeExecutions.delete(sessionID)
+  const pendingDispatch = ctx.tracing.subagentParents.get(sessionID)
+  if (pendingDispatch) {
+    ctx.tracing.subagentParents.delete(sessionID)
+    markSeen(ctx.tracing.consumedSubagentDispatches, pendingDispatch.callID)
+  }
 
   sweepExecution(sessionID, ctx)
 

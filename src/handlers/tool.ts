@@ -123,13 +123,13 @@ function startSubagentSpan(callID: string, ctx: HandlerContext) {
 
 function linkSubagent(callID: string, childID: unknown, ctx: HandlerContext) {
   const meta = ctx.tracing.toolMeta.get(callID)
-  if (typeof childID !== "string" || meta?.tool !== "subagent") return
+  if (typeof childID !== "string" || meta?.tool !== "subagent" || ctx.tracing.consumedSubagentDispatches.has(callID)) return
   setBoundedMap(ctx.tracing.toolMeta, callID, { ...meta, childSessionID: childID })
   startSubagentSpan(callID, ctx)
   const span = ctx.tracing.toolSpans.get(callID)
   span?.setAttribute("subagent.session_id", childID)
   const spanContext = span?.spanContext()
-  if (spanContext) setBoundedMap(ctx.tracing.subagentParents, childID, spanContext)
+  if (spanContext) setBoundedMap(ctx.tracing.subagentParents, childID, { spanContext, callID })
 }
 
 export function handleToolProgress(e: EventOf<"session.tool.progress">, ctx: HandlerContext) {

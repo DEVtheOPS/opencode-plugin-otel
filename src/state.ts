@@ -117,6 +117,7 @@ export function acquireTracingState(): TracingState {
       toolSpans: new Map(),
       toolSpanContexts: new Map(),
       subagentParents: new Map(),
+      consumedSubagentDispatches: new Set(),
       toolMeta: new Map(),
       stepMeta: new Map(),
       sessionTotals: new Map(),

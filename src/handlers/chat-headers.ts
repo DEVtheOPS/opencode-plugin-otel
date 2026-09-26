@@ -53,6 +53,7 @@ export function applyModelContext(
   model: { providerID: string; id: string },
   span: Span,
   ctx: HandlerContext,
+  retain = false,
 ): void {
   const snapshot = ctx.tracing.modelContexts.get(sessionID)
   if (!snapshot || snapshot.agent !== agent || snapshot.providerID !== model.providerID || snapshot.modelID !== model.id) return
@@ -60,7 +61,7 @@ export function applyModelContext(
     [LLM_INPUT_MESSAGES]: snapshot.inputMessages,
     ...(snapshot.inputValue ? { [INPUT_VALUE]: snapshot.inputValue, [INPUT_MIME_TYPE]: MimeType.TEXT } : {}),
   })
-  ctx.tracing.modelContexts.delete(sessionID)
+  if (!retain) ctx.tracing.modelContexts.delete(sessionID)
 }
 
 /** Injects the active LLM span's W3C trace context into outbound model requests. */
@@ -96,6 +97,6 @@ export async function handleModelRequest(event: ModelRequestEvent, ctx: HandlerC
   }
   if (active.providerID !== providerID || active.modelID !== event.model.id || active.agent !== event.agent) return
   const span = ctx.tracing.provisionalLlm.get(event.sessionID) ?? ctx.tracing.activeStepSpans.get(event.sessionID)
-  if (span) applyModelContext(event.sessionID, event.agent, event.model, span, ctx)
+  if (span) applyModelContext(event.sessionID, event.agent, event.model, span, ctx, ctx.tracing.provisionalLlm.has(event.sessionID))
   if (propagate) injectTraceContext(active.spanContext, event.headers)
 }

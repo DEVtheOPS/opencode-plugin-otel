@@ -88,6 +88,10 @@ describe("captureModelContext", () => {
     expect(String(span.attributes["llm.input_messages"])).toContain('"role":"system"')
     expect(String(span.attributes["llm.input_messages"])).not.toContain("SECRET_BINARY")
     expect(String(span.attributes["llm.input_messages"]).length).toBeLessThan(16_000)
+    expect(ctx.tracing.modelContexts.size).toBe(1)
+    ctx.tracing.activePrompts.set("ses_1", { text: "admitted prompt", startMs: 1 })
+    handleStepStarted(evt("session.step.started", { sessionID: "ses_1", assistantMessageID: "msg_1", agent: "build", model: { id: "m", providerID: "vllm" }, started: 1 }), ctx)
+    expect(span.attributes["input.value"]).toBe("x".repeat(1_000))
     expect(ctx.tracing.modelContexts.size).toBe(0)
   })
 
