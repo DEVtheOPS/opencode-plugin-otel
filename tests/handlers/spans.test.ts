@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test"
 import { handleExecutionStarted, handleSessionCreated } from "../../src/handlers/session.ts"
 import { handleStepStarted } from "../../src/handlers/step.ts"
 import { handleToolInputStarted } from "../../src/handlers/tool.ts"
+import { handleToolCalled } from "../../src/handlers/tool.ts"
 import { makeCtx, evt } from "../helpers.ts"
 
 describe("trace nesting", () => {
@@ -14,6 +15,7 @@ describe("trace nesting", () => {
       ctx,
     )
     handleToolInputStarted(evt("session.tool.input.started", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_1", name: "read" }), ctx)
+    handleToolCalled(evt("session.tool.called", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_1", input: {}, executed: true }), ctx)
 
     const run = tracer.spans.find((s) => s.name === "opencode.session")!
     const step = tracer.spans.find((s) => s.name === "opencode.llm")!

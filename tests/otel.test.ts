@@ -142,6 +142,40 @@ describe("setupOtel", () => {
       else process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = original
     }
   })
+
+  test("does not send inherited OTLP credentials when the accepted setup has no headers", async () => {
+    const previous = process.env["OTEL_EXPORTER_OTLP_HEADERS"]
+    const previousMetrics = process.env["OTEL_EXPORTER_OTLP_METRICS_HEADERS"]
+    const received: Headers[] = []
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        received.push(request.headers)
+        return new Response(null, { status: 200 })
+      },
+    })
+    try {
+      process.env["OTEL_EXPORTER_OTLP_HEADERS"] = "Authorization=Bearer rejected"
+      process.env["OTEL_EXPORTER_OTLP_METRICS_HEADERS"] = "x-rejected=secret"
+      providers = await setupOtel(`http://127.0.0.1:${server.port}`, "http/json", 60000, 5000, "2.0.0")
+      providers.meterProvider.getMeter("test").createCounter("test.counter").add(1)
+      await providers.meterProvider.forceFlush()
+      expect(received.length).toBeGreaterThan(0)
+      expect(received[0]!.get("authorization")).toBeNull()
+      expect(received[0]!.get("x-rejected")).toBeNull()
+    } finally {
+      const active = providers
+      providers = undefined
+      if (active) await Promise.allSettled([
+        active.meterProvider.shutdown(), active.loggerProvider.shutdown(), active.tracerProvider.shutdown(),
+      ])
+      if (previous === undefined) delete process.env["OTEL_EXPORTER_OTLP_HEADERS"]
+      else process.env["OTEL_EXPORTER_OTLP_HEADERS"] = previous
+      if (previousMetrics === undefined) delete process.env["OTEL_EXPORTER_OTLP_METRICS_HEADERS"]
+      else process.env["OTEL_EXPORTER_OTLP_METRICS_HEADERS"] = previousMetrics
+      server.stop()
+    }
+  })
 })
 
 describe("forceFlushOtel", () => {

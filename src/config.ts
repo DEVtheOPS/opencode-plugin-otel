@@ -144,10 +144,8 @@ function expandDisabledTraces(values: string[]): Set<string> {
  * variables. For every field a provided option wins over the environment
  * variable, which in turn wins over the built-in default.
  *
- * Copies the resolved headers, resource attributes, and metrics temporality into
- * `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_RESOURCE_ATTRIBUTES`, and
- * `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE` so the OTel SDK picks them
- * up automatically when initialised.
+ * Copies resource attributes and metrics temporality into the corresponding
+ * OTel environment variables. OTLP headers are passed directly to exporters.
  */
 export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
   const resolvedOptions = typeof options === "object" && options !== null ? options : {}
@@ -177,7 +175,6 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
 
   if (metricsTemporality) process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = metricsTemporality
 
-  if (otlpHeaders) process.env["OTEL_EXPORTER_OTLP_HEADERS"] = otlpHeaders
   if (resourceAttributes) process.env["OTEL_RESOURCE_ATTRIBUTES"] = resourceAttributes
 
   const optionMetrics = pickStringList(resolvedOptions.disabledMetrics)

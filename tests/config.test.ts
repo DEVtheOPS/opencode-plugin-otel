@@ -146,10 +146,10 @@ describe("loadConfig", () => {
     expect(cfg.logsInterval).toBe(5000)
   })
 
-  test("copies OPENCODE_OTLP_HEADERS to OTEL_EXPORTER_OTLP_HEADERS", () => {
+  test("keeps OPENCODE_OTLP_HEADERS out of global OTel exporter configuration", () => {
     process.env["OPENCODE_OTLP_HEADERS"] = "api-key=abc123"
-    loadConfig()
-    expect(process.env["OTEL_EXPORTER_OTLP_HEADERS"]).toBe("api-key=abc123")
+    expect(loadConfig().otlpHeaders).toBe("api-key=abc123")
+    expect(process.env["OTEL_EXPORTER_OTLP_HEADERS"]).toBeUndefined()
   })
 
   test("reads OPENCODE_OTLP_HEADERS_HELPER", () => {
@@ -227,11 +227,11 @@ describe("loadConfig", () => {
     expect(process.env["OTEL_RESOURCE_ATTRIBUTES"]).toBe("existing=attr")
   })
 
-  test("OPENCODE_OTLP_HEADERS overwrites pre-existing OTEL_EXPORTER_OTLP_HEADERS", () => {
+  test("OPENCODE_OTLP_HEADERS does not mutate pre-existing global OTel headers", () => {
     process.env["OTEL_EXPORTER_OTLP_HEADERS"] = "old-header=old"
     process.env["OPENCODE_OTLP_HEADERS"] = "new-header=new"
     loadConfig()
-    expect(process.env["OTEL_EXPORTER_OTLP_HEADERS"]).toBe("new-header=new")
+    expect(process.env["OTEL_EXPORTER_OTLP_HEADERS"]).toBe("old-header=old")
   })
 
   test("OPENCODE_RESOURCE_ATTRIBUTES overwrites pre-existing OTEL_RESOURCE_ATTRIBUTES", () => {
@@ -423,10 +423,10 @@ describe("loadConfig options", () => {
     expect(loadConfig({ metricPrefix: "claude_code." }).metricPrefix).toBe("claude_code.")
   })
 
-  test("option otlpHeaders is copied to OTEL_EXPORTER_OTLP_HEADERS", () => {
+  test("option otlpHeaders is resolved without global OTel header mutation", () => {
     const cfg = loadConfig({ otlpHeaders: "api-key=opt" })
     expect(cfg.otlpHeaders).toBe("api-key=opt")
-    expect(process.env["OTEL_EXPORTER_OTLP_HEADERS"]).toBe("api-key=opt")
+    expect(process.env["OTEL_EXPORTER_OTLP_HEADERS"]).toBeUndefined()
   })
 
   test("option resourceAttributes is copied to OTEL_RESOURCE_ATTRIBUTES", () => {

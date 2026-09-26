@@ -14,12 +14,11 @@ function inputStarted(id = "call_1", name = "bash", sessionID = "ses_1", created
 }
 
 describe("handleToolInputStarted", () => {
-  test("starts a tool span named after the tool", () => {
+  test("stores the tool name without counting model input streaming as execution", () => {
     const { ctx, tracer } = makeCtx()
     seed(ctx)
     handleToolInputStarted(inputStarted(), ctx)
-    const span = tracer.spans.find((s) => s.name.startsWith("opencode.tool."))!
-    expect(span.name).toBe("opencode.tool.bash")
+    expect(tracer.spans.filter((s) => s.name.startsWith("opencode.tool."))).toHaveLength(0)
     expect(ctx.tracing.toolMeta.get("call_1")!.tool).toBe("bash")
   })
 })
@@ -64,6 +63,7 @@ describe("handleToolSuccess", () => {
     const { ctx, histograms, logger, tracer } = makeCtx()
     seed(ctx)
     handleToolInputStarted(inputStarted("call_1", "read", "ses_1", 1000), ctx)
+    handleToolCalled(evt("session.tool.called", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_1", input: {}, executed: true }, 1000), ctx)
     handleToolSuccess(evt("session.tool.success", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_1", content: [{ type: "text", text: "file body" }], executed: true }, 1250), ctx)
     expect(histograms.tool.calls[0]!.value).toBe(250)
     expect(histograms.tool.calls[0]!.attrs["success"]).toBe(true)
@@ -82,10 +82,21 @@ describe("handleToolFailed", () => {
     const { ctx, histograms, logger, tracer } = makeCtx()
     seed(ctx)
     handleToolInputStarted(inputStarted(), ctx)
+    handleToolCalled(evt("session.tool.called", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_1", input: {}, executed: true }, 1000), ctx)
     handleToolFailed(evt("session.tool.failed", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_1", error: { type: "ToolError", message: "nope" }, executed: true }, 1200), ctx)
     expect(histograms.tool.calls[0]!.attrs["success"]).toBe(false)
     expect(logger.records.at(-1)!.attributes?.["error"]).toBe("ToolError: nope")
     const span = tracer.spans.find((s) => s.name === "opencode.tool.bash")!
     expect(span.status.code).toBe(SpanStatusCode.ERROR)
+  })
+
+  test("measures execution from called, excluding slow argument streaming", () => {
+    const { ctx, histograms, tracer } = makeCtx()
+    seed(ctx)
+    handleToolInputStarted(inputStarted("call_1", "read", "ses_1", 1000), ctx)
+    handleToolCalled(evt("session.tool.called", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_1", input: {}, executed: true }, 5000), ctx)
+    handleToolSuccess(evt("session.tool.success", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_1", content: [{ type: "text", text: "ok" }], executed: true }, 5300), ctx)
+    expect(histograms.tool.calls[0]!.value).toBe(300)
+    expect(tracer.spans.find((span) => span.name === "opencode.tool.read")?.startTime).toBe(5000)
   })
 })

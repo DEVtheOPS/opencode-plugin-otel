@@ -31,7 +31,7 @@ const SHELL_TOOL_RE = /(^|\.)(bash|shell)$/i
 
 type ToolContent = { type: "text"; text: string } | { type: "file"; uri: string; mime: string; name?: string }
 
-/** Records the tool name and start time, and starts a child tool span of the owning step. */
+/** Records the tool name for correlation with its execution and terminal events. */
 export function handleToolInputStarted(e: EventOf<"session.tool.input.started">, ctx: HandlerContext) {
   const d = e.data
   setBoundedMap(ctx.tracing.toolMeta, d.id, {
@@ -40,27 +40,6 @@ export function handleToolInputStarted(e: EventOf<"session.tool.input.started">,
     tool: d.name,
     startMs: e.created,
   })
-  if (!isTraceEnabled("tool", ctx)) return
-  const { agentName, agentType } = getSessionAgentMeta(d.sessionID, ctx)
-  const span = ctx.tracer.startSpan(
-    `${ctx.tracePrefix}tool.${d.name}`,
-    {
-      startTime: e.created,
-      kind: SpanKind.INTERNAL,
-      attributes: {
-        [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.TOOL,
-        [SESSION_ID]: d.sessionID,
-        [TOOL_ID]: d.id,
-        [TOOL_NAME]: d.name,
-        [AGENT_NAME]: agentName,
-        "agent.type": agentType,
-        ...ctx.commonAttrs,
-      },
-    },
-    resolveStepContext(d.sessionID, d.assistantMessageID, ctx),
-  )
-  setBoundedMap(ctx.tracing.toolSpans, d.id, span)
-  setBoundedMap(ctx.tracing.toolSpanContexts, d.id, span.spanContext())
 }
 
 /** Attaches tool input to the span and retains the command for terminal commit detection. */
@@ -69,9 +48,30 @@ export function handleToolCalled(e: EventOf<"session.tool.called">, ctx: Handler
   const meta = ctx.tracing.toolMeta.get(d.id)
   const { agentName, agentType } = getSessionAgentMeta(d.sessionID, ctx)
   const inputJson = safeJson(d.input)
+  if (meta && d.executed) {
+    setBoundedMap(ctx.tracing.toolMeta, d.id, { ...meta, startMs: e.created, executionStarted: true })
+  }
 
-  const span = ctx.tracing.toolSpans.get(d.id)
+  const span = d.executed && meta && isTraceEnabled("tool", ctx)
+    ? ctx.tracer.startSpan(
+        `${ctx.tracePrefix}tool.${meta.tool}`,
+        {
+          startTime: e.created,
+          kind: SpanKind.INTERNAL,
+          attributes: {
+            [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.TOOL,
+            [SESSION_ID]: d.sessionID,
+            [TOOL_ID]: d.id,
+            [TOOL_NAME]: meta.tool,
+            ...ctx.commonAttrs,
+          },
+        },
+        resolveStepContext(d.sessionID, d.assistantMessageID, ctx),
+      )
+    : undefined
   if (span) {
+    setBoundedMap(ctx.tracing.toolSpans, d.id, span)
+    setBoundedMap(ctx.tracing.toolSpanContexts, d.id, span.spanContext())
     span.setAttributes({
       [TOOL_PARAMETERS]: inputJson,
       [INPUT_VALUE]: inputJson,
@@ -82,7 +82,7 @@ export function handleToolCalled(e: EventOf<"session.tool.called">, ctx: Handler
   }
 
   if (meta && typeof d.input["command"] === "string") {
-    setBoundedMap(ctx.tracing.toolMeta, d.id, { ...meta, command: d.input["command"] })
+    setBoundedMap(ctx.tracing.toolMeta, d.id, { ...ctx.tracing.toolMeta.get(d.id)!, command: d.input["command"] })
   }
 }
 
@@ -111,7 +111,7 @@ function finishTool(
   const meta = ctx.tracing.toolMeta.get(callID)
   ctx.tracing.toolMeta.delete(callID)
   const tool = meta?.tool ?? "unknown"
-  const start = meta?.startMs ?? endMs
+  const start = executed && meta?.executionStarted ? meta.startMs : endMs
   const durationMs = Math.max(0, endMs - start)
   const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
   const sizeBytes = output ? Buffer.byteLength(output, "utf8") : 0
@@ -135,7 +135,7 @@ function finishTool(
     })
   }
 
-  if (isMetricEnabled("tool.duration", ctx)) {
+  if (executed && isMetricEnabled("tool.duration", ctx)) {
     ctx.instruments.toolDurationHistogram.record(durationMs, {
       ...ctx.commonAttrs,
       "session.id": sessionID,

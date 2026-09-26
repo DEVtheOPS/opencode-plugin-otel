@@ -105,6 +105,7 @@ export type ToolMeta = {
   assistantMessageID: string
   tool: string
   startMs: number
+  executionStarted?: boolean
   command?: string
 }
 

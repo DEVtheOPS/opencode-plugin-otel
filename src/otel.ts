@@ -65,6 +65,26 @@ export function buildHttpSignalUrl(endpoint: string, signal: "traces" | "metrics
   return url.toString()
 }
 
+function withoutOtlpHeaderEnvironment<T>(create: () => T): T {
+  const keys = [
+    "OTEL_EXPORTER_OTLP_HEADERS",
+    "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+    "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+    "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+  ]
+  const previous = keys.map((key) => process.env[key])
+  for (const key of keys) delete process.env[key]
+  try {
+    return create()
+  } finally {
+    keys.forEach((key, index) => {
+      const value = previous[index]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    })
+  }
+}
+
 function metricTemporalityPreference(value: MetricsTemporality | undefined): AggregationTemporalityPreference {
   if (value === "delta") return AggregationTemporalityPreference.DELTA
   if (value === "lowmemory") return AggregationTemporalityPreference.LOWMEMORY
@@ -98,21 +118,21 @@ export async function setupOtel(
       console.warn("[opencode-plugin-otel] Failed to prewarm OTLP headers helper. Falling back to refresh-on-auth-failure.", error)
     }
   }
-  const makeMetricExporter = (headers: HeadersMap) => protocol === "http/protobuf"
+  const makeMetricExporter = (headers: HeadersMap) => withoutOtlpHeaderEnvironment(() => protocol === "http/protobuf"
     ? new OTLPProtoMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers, temporalityPreference })
     : protocol === "http/json"
       ? new OTLPHttpMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers, temporalityPreference })
-      : new OTLPMetricExporter({ url: endpoint, metadata: createGrpcMetadata(headers), temporalityPreference })
-  const makeLogExporter = (headers: HeadersMap) => protocol === "http/protobuf"
+      : new OTLPMetricExporter({ url: endpoint, metadata: createGrpcMetadata(headers), temporalityPreference }))
+  const makeLogExporter = (headers: HeadersMap) => withoutOtlpHeaderEnvironment(() => protocol === "http/protobuf"
     ? new OTLPProtoLogExporter({ url: buildHttpSignalUrl(endpoint, "logs"), headers })
     : protocol === "http/json"
       ? new OTLPHttpLogExporter({ url: buildHttpSignalUrl(endpoint, "logs"), headers })
-      : new OTLPLogExporter({ url: endpoint, metadata: createGrpcMetadata(headers) })
-  const makeTraceExporter = (headers: HeadersMap) => protocol === "http/protobuf"
+      : new OTLPLogExporter({ url: endpoint, metadata: createGrpcMetadata(headers) }))
+  const makeTraceExporter = (headers: HeadersMap) => withoutOtlpHeaderEnvironment(() => protocol === "http/protobuf"
     ? new OTLPProtoTraceExporter({ url: buildHttpSignalUrl(endpoint, "traces"), headers })
     : protocol === "http/json"
       ? new OTLPHttpTraceExporter({ url: buildHttpSignalUrl(endpoint, "traces"), headers })
-      : new OTLPTraceExporter({ url: endpoint, metadata: createGrpcMetadata(headers) })
+      : new OTLPTraceExporter({ url: endpoint, metadata: createGrpcMetadata(headers) }))
   const metricExporter = otlpHeadersHelper
     ? new RefreshingMetricExporter(makeMetricExporter, dynamicHeaders)
     : makeMetricExporter(staticHeaders)
