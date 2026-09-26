@@ -137,6 +137,7 @@ export function makeTracer(): SpyTracer {
 export function makeTracingState(): TracingState {
   return {
     seenEvents: new Set(),
+    eventQueue: Promise.resolve(),
     runSpans: new Map(),
     runSpanContexts: new Map(),
     stepSpans: new Map(),
@@ -149,6 +150,7 @@ export function makeTracingState(): TracingState {
     countedSessions: new Set(),
     countedMessages: new Set(),
     sessionProjects: new Map(),
+    sessionIdentity: new Map(),
     stepOutputs: new Map(),
     pendingPrompts: new Map(),
     pendingPermissions: new Map(),

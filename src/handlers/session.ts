@@ -75,14 +75,16 @@ function countSession(sessionID: string, isSubagent: boolean, ctx: HandlerContex
 export function ensureSession(sessionID: string, at: number, ctx: HandlerContext): SessionTotals {
   const existing = ctx.tracing.sessionTotals.get(sessionID)
   if (existing) return existing
-  countSession(sessionID, false, ctx)
+  const identity = ctx.tracing.sessionIdentity.get(sessionID)
+  countSession(sessionID, identity?.agentType === "subagent", ctx)
   const totals: SessionTotals = {
-    startMs: at,
+    startMs: identity?.startMs ?? at,
     tokens: 0,
     cost: 0,
     messages: 0,
-    agent: "unknown",
-    agentType: "primary",
+    agent: identity?.agent ?? "unknown",
+    agentType: identity?.agentType ?? "primary",
+    ...(identity?.parentID ? { parentID: identity.parentID } : {}),
   }
   setBoundedMap(ctx.tracing.sessionTotals, sessionID, totals)
   return totals
@@ -96,6 +98,12 @@ export function handleSessionCreated(e: EventOf<"session.created">, ctx: Handler
   const agent = d.agent ?? "unknown"
 
   setBoundedMap(ctx.tracing.sessionProjects, d.sessionID, d.projectID)
+  setBoundedMap(ctx.tracing.sessionIdentity, d.sessionID, {
+    agent,
+    agentType,
+    ...(d.parentID ? { parentID: d.parentID } : {}),
+    startMs: e.created,
+  })
   countSession(d.sessionID, isSubagent, ctx)
   if (isSubagent && isMetricEnabled("subtask.count", ctx)) {
     ctx.instruments.subtaskCounter.add(1, {

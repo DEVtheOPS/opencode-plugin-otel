@@ -97,6 +97,7 @@ export function acquireTracingState(): TracingState {
   if (!state) {
     state = {
       seenEvents: new Set(),
+      eventQueue: Promise.resolve(),
       runSpans: new Map(),
       runSpanContexts: new Map(),
       stepSpans: new Map(),
@@ -109,6 +110,7 @@ export function acquireTracingState(): TracingState {
       countedSessions: new Set(),
       countedMessages: new Set(),
       sessionProjects: new Map(),
+      sessionIdentity: new Map(),
       stepOutputs: new Map(),
       pendingPrompts: new Map(),
       pendingPermissions: new Map(),

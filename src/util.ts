@@ -69,6 +69,16 @@ export function markSeen(seen: TracingState["seenEvents"], id: string): void {
   seen.add(id)
 }
 
+export function enqueueEvent(state: TracingState, id: string, handle: () => Promise<void>): Promise<void> {
+  const task = state.eventQueue.then(async () => {
+    if (state.seenEvents.has(id)) return
+    await handle()
+    markSeen(state.seenEvents, id)
+  })
+  state.eventQueue = task.catch(() => {})
+  return task
+}
+
 /**
  * Returns `true` if the metric name (without prefix) is not in the disabled set.
  * The `name` should be the suffix after the metric prefix, e.g. `"session.count"`.
@@ -127,16 +137,23 @@ export function getSessionAgentMeta(
 export async function contextForSession(
   sessionID: string,
   ctx: HandlerContext,
-  projectForSession: (sessionID: string) => Promise<string>,
+  getSession: (sessionID: string) => Promise<{ projectID: string; agent?: string; parentID?: string; time: { created: number } }>,
 ): Promise<HandlerContext> {
   let projectID = ctx.tracing.sessionProjects.get(sessionID)
-  if (!projectID) {
+  if (!projectID || !ctx.tracing.sessionIdentity.has(sessionID)) {
     try {
-      projectID = await projectForSession(sessionID)
+      const session = await getSession(sessionID)
+      projectID = session.projectID
       setBoundedMap(ctx.tracing.sessionProjects, sessionID, projectID)
+      setBoundedMap(ctx.tracing.sessionIdentity, sessionID, {
+        agent: session.agent ?? "unknown",
+        agentType: session.parentID ? "subagent" : "primary",
+        ...(session.parentID ? { parentID: session.parentID } : {}),
+        startMs: session.time.created,
+      })
     } catch {
-      return ctx
+      if (!projectID) return ctx
     }
   }
-  return { ...ctx, commonAttrs: { ...ctx.commonAttrs, "project.id": projectID } }
+  return projectID ? { ...ctx, commonAttrs: { ...ctx.commonAttrs, "project.id": projectID } } : ctx
 }

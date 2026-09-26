@@ -6,7 +6,7 @@ import { forceFlushOtel } from "./otel.ts"
 import { remoteParentContext } from "./trace-context.ts"
 import { acquireSharedOtel, acquireTracingState, flushSharedOtel, releaseSharedOtel } from "./state.ts"
 import { LEVELS, type HandlerContext, type Level, type OpenCodeContext, type OpenCodeEvent } from "./types.ts"
-import { contextForSession, markSeen, setBoundedMap } from "./util.ts"
+import { contextForSession, enqueueEvent, setBoundedMap } from "./util.ts"
 import {
   finalizeSession,
   handleExecutionEnded,
@@ -118,7 +118,7 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
   const scoped = (sessionID: string) => contextForSession(
     sessionID,
     hctx,
-    async (id) => (await ctx.session.get({ sessionID: id })).projectID,
+    async (id) => ctx.session.get({ sessionID: id }),
   )
 
   await ctx.session.hook("model.request", (event) => {
@@ -128,6 +128,12 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
   const dispatch = async (event: OpenCodeEvent): Promise<void> => {
     if (event.type === "session.created") {
       setBoundedMap(tracing.sessionProjects, event.data.sessionID, event.data.projectID)
+      setBoundedMap(tracing.sessionIdentity, event.data.sessionID, {
+        agent: event.data.agent ?? "unknown",
+        agentType: event.data.parentID ? "subagent" : "primary",
+        ...(event.data.parentID ? { parentID: event.data.parentID } : {}),
+        startMs: event.created,
+      })
     }
     const sessionID = "sessionID" in event.data && typeof event.data.sessionID === "string"
       ? event.data.sessionID
@@ -210,10 +216,8 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
   const running = (async () => {
     try {
       for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
-        if (tracing.seenEvents.has(event.id)) continue
-        markSeen(tracing.seenEvents, event.id)
         try {
-          await dispatch(event)
+          await enqueueEvent(tracing, event.id, () => dispatch(event))
         } catch (err) {
           await log("error", "otel: failed to handle event", {
             type: event.type,

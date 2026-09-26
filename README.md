@@ -123,7 +123,8 @@ When OpenCode loads multiple locations in one process, all enabled instances mus
 use identical telemetry configuration. A conflicting endpoint, authentication,
 resource attribute, metric prefix, or signal option fails setup rather than
 exporting one location's data using another location's settings. Event attributes
-use the observed session's project ID when available.
+use the observed session's project ID when available. Shared event processing is
+serialized so an asynchronous session lookup cannot reorder step start/end events.
 
 The environment variables (set them in your shell profile — `~/.zshrc`, `~/.bashrc`, etc.):
 

@@ -80,6 +80,13 @@ export type SessionTotals = {
   parentID?: string
 }
 
+export type SessionIdentity = {
+  agent: string
+  agentType: SessionAgentType
+  parentID?: string
+  startMs: number
+}
+
 /** Model/agent metadata for an in-flight LLM step, keyed by assistant message ID. */
 export type StepMeta = {
   sessionID: string
@@ -127,6 +134,7 @@ export type SharedOtel = {
  */
 export type TracingState = {
   seenEvents: Set<string>
+  eventQueue: Promise<void>
   runSpans: Map<string, Span>
   runSpanContexts: Map<string, SpanContext>
   stepSpans: Map<string, Span>
@@ -139,6 +147,7 @@ export type TracingState = {
   countedSessions: Set<string>
   countedMessages: Set<string>
   sessionProjects: Map<string, string>
+  sessionIdentity: Map<string, SessionIdentity>
   stepOutputs: Map<string, Map<number, string>>
   pendingPrompts: Map<string, PendingPrompt>
   pendingPermissions: Map<string, PendingPermission>

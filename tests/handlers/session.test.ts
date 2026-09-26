@@ -90,6 +90,20 @@ describe("handleExecutionStarted", () => {
     expect(ctx.tracing.sessionTotals.has("ses_new")).toBe(true)
     expect(counters.session.calls).toHaveLength(1)
   })
+
+  test("keeps a subagent identity across executions", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "parent", projectID: "p" }), ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "parent" }), ctx)
+    handleSessionCreated(evt("session.created", { sessionID: "sub", parentID: "parent", agent: "explore", projectID: "p" }), ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "sub" }), ctx)
+    handleExecutionEnded(evt("session.execution.succeeded", { sessionID: "sub" }), ctx, { type: "succeeded" })
+    finalizeSession("sub", ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "sub" }), ctx)
+    expect(ctx.tracing.sessionTotals.get("sub")?.agentType).toBe("subagent")
+    expect(ctx.tracing.sessionTotals.get("sub")?.agent).toBe("explore")
+    expect(tracer.spans.at(-1)?.parentSpan).toBe(tracer.spans[0])
+  })
 })
 
 describe("handleExecutionEnded", () => {

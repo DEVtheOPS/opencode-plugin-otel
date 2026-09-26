@@ -2,8 +2,10 @@ import { describe, test, expect } from "bun:test"
 import { loadConfig } from "../src/config.ts"
 import { acquireSharedOtel, configKey } from "../src/state.ts"
 import { makeCtx } from "./helpers.ts"
-import { contextForSession, markSeen } from "../src/util.ts"
+import { contextForSession, enqueueEvent, markSeen } from "../src/util.ts"
 import type { HandlerContext } from "../src/types.ts"
+import { handleExecutionStarted } from "../src/handlers/session.ts"
+import { evt } from "./helpers.ts"
 
 describe("multi-location telemetry", () => {
   test("rejects a second location with different exporter settings", async () => {
@@ -27,13 +29,44 @@ describe("multi-location telemetry", () => {
   test("attributes observed sessions to their own projects", async () => {
     const { ctx } = makeCtx()
     const base: HandlerContext = { ...ctx, commonAttrs: { team: "platform" } }
-    const projectFor = async (id: string) => id === "one" ? "project-one" : "project-two"
+    const projectFor = async (id: string) => ({ projectID: id === "one" ? "project-one" : "project-two", time: { created: 100 } })
     const first = await contextForSession("one", base, projectFor)
     const second = await contextForSession("two", base, projectFor)
     expect(first.commonAttrs["project.id"]).toBe("project-one")
     expect(second.commonAttrs["project.id"]).toBe("project-two")
     expect(base.commonAttrs["project.id"]).toBeUndefined()
     expect((await contextForSession("unknown", base, async () => { throw new Error("not found") })).commonAttrs["project.id"]).toBeUndefined()
+  })
+
+  test("hydrates a resumed subagent when session.created was missed", async () => {
+    const { ctx } = makeCtx()
+    const scoped = await contextForSession("sub", ctx, async () => ({
+      projectID: "other-project",
+      agent: "explore",
+      parentID: "parent",
+      time: { created: 500 },
+    }))
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "sub" }, 1000), scoped)
+    expect(ctx.tracing.sessionTotals.get("sub")).toMatchObject({
+      agent: "explore", agentType: "subagent", parentID: "parent", startMs: 500,
+    })
+    expect(scoped.commonAttrs["project.id"]).toBe("other-project")
+  })
+
+  test("serializes duplicate subscribers across an asynchronous lookup", async () => {
+    const { ctx } = makeCtx()
+    const order: string[] = []
+    let release!: () => void
+    const lookup = new Promise<void>((resolve) => { release = resolve })
+    const started = enqueueEvent(ctx.tracing, "start", async () => {
+      await lookup
+      order.push("start")
+    })
+    const duplicate = enqueueEvent(ctx.tracing, "start", async () => { order.push("duplicate") })
+    const ended = enqueueEvent(ctx.tracing, "end", async () => { order.push("end") })
+    release()
+    await Promise.all([started, duplicate, ended])
+    expect(order).toEqual(["start", "end"])
   })
 
   test("bounds session and message deduplication sets", () => {
