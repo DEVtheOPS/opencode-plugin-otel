@@ -154,6 +154,7 @@ export function makeTracingState(): TracingState {
     stepOutputs: new Map(),
     pendingPrompts: new Map(),
     activePrompts: new Map(),
+    activeExecutions: new Set(),
     pendingPermissions: new Map(),
     activeLlm: new Map(),
     provisionalLlm: new Map(),

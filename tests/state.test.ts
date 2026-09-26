@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test"
 import { loadConfig } from "../src/config.ts"
-import { acquireSharedOtel, configKey } from "../src/state.ts"
+import { acquireSharedOtel, configKey, createFlushScheduler } from "../src/state.ts"
 import { makeCtx } from "./helpers.ts"
 import { contextForSession, enqueueEvent, markSeen } from "../src/util.ts"
 import type { HandlerContext } from "../src/types.ts"
@@ -67,6 +67,19 @@ describe("multi-location telemetry", () => {
     release()
     await Promise.all([started, duplicate, ended])
     expect(order).toEqual(["start", "end"])
+  })
+
+  test("does not block the shared event queue on a pending exporter flush", async () => {
+    const { ctx } = makeCtx()
+    let release!: () => void
+    const wait = new Promise<void>((resolve) => { release = resolve })
+    const flush = createFlushScheduler(() => wait)
+    await enqueueEvent(ctx.tracing, "end", async () => { flush.request() })
+    let started = false
+    await enqueueEvent(ctx.tracing, "next", async () => { started = true })
+    expect(started).toBe(true)
+    release()
+    await flush.drain()
   })
 
   test("bounds session and message deduplication sets", () => {

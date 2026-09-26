@@ -33,9 +33,17 @@ export function handlePromptEnqueued(e: EventOf<"session.inbox.enqueued">, ctx: 
   for (const agent of item.payload.agents ?? []) parts.push(agent.name)
   for (const skill of item.payload.skills ?? []) parts.push(skill.name)
   const text = parts.filter(Boolean).join("\n")
-  const queue = ctx.tracing.pendingPrompts.get(sessionID) ?? []
-  if (queue.length < 100) queue.push({ text, startMs: e.created })
-  setBoundedMap(ctx.tracing.pendingPrompts, sessionID, queue)
+  if (item.delivery === "steer" && ctx.tracing.activeExecutions.has(sessionID)) {
+    const active = ctx.tracing.activePrompts.get(sessionID)
+    setBoundedMap(ctx.tracing.activePrompts, sessionID, {
+      text: active?.text ? `${active.text}\n${text}` : text,
+      startMs: active?.startMs ?? e.created,
+    })
+  } else {
+    const queue = ctx.tracing.pendingPrompts.get(sessionID) ?? []
+    if (queue.length < 100) queue.push({ text, startMs: e.created })
+    setBoundedMap(ctx.tracing.pendingPrompts, sessionID, queue)
+  }
   const totals = ctx.tracing.sessionTotals.get(sessionID)
   ctx.emitLog({
     severityNumber: SeverityNumber.INFO,
@@ -162,6 +170,7 @@ export function handleSessionCreated(e: EventOf<"session.created">, ctx: Handler
 /** Starts the root run span for a single execution (user turn), keyed by session id. */
 export function handleExecutionStarted(e: EventOf<"session.execution.started">, ctx: HandlerContext) {
   const sessionID = e.data.sessionID
+  markSeen(ctx.tracing.activeExecutions, sessionID)
   const totals = ensureSession(sessionID, e.created, ctx)
   const queue = ctx.tracing.pendingPrompts.get(sessionID)
   const pendingPrompt = queue?.shift()
@@ -219,6 +228,7 @@ export function handleExecutionEnded(
 ) {
   const sessionID = e.data.sessionID
   const totals = ctx.tracing.sessionTotals.get(sessionID)
+  ctx.tracing.activeExecutions.delete(sessionID)
 
   sweepExecution(sessionID, ctx)
 
@@ -319,6 +329,7 @@ export function finalizeSession(sessionID: string, ctx: HandlerContext) {
   ctx.tracing.sessionTotals.delete(sessionID)
   ctx.tracing.activeLlm.delete(sessionID)
   ctx.tracing.activePrompts.delete(sessionID)
+  ctx.tracing.activeExecutions.delete(sessionID)
 
   const attrs = { ...ctx.commonAttrs, "session.id": sessionID }
   const durationMs = Date.now() - totals.startMs

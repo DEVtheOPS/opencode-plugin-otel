@@ -151,6 +151,7 @@ export type TracingState = {
   stepOutputs: Map<string, Map<number, string>>
   pendingPrompts: Map<string, PendingPrompt[]>
   activePrompts: Map<string, PendingPrompt>
+  activeExecutions: Set<string>
   pendingPermissions: Map<string, PendingPermission>
   activeLlm: Map<string, LlmRequestContext>
   provisionalLlm: Map<string, Span>

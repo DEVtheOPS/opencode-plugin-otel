@@ -121,6 +121,26 @@ describe("handleExecutionStarted", () => {
     handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
     expect(tracer.spans.at(-1)?.attributes["input.value"]).toBe("second")
   })
+
+  test("applies a steering prompt to the current run, not the next run", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1", projectID: "p" }), ctx)
+    handlePromptEnqueued(evt("session.inbox.enqueued", {
+      sessionID: "ses_1", inboxID: "first", item: { type: "user", payload: { text: "first" }, delivery: "steer" },
+    }), ctx, false)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    handlePromptEnqueued(evt("session.inbox.enqueued", {
+      sessionID: "ses_1", inboxID: "steering", item: { type: "user", payload: { text: "steering" }, delivery: "steer" },
+    }), ctx, false)
+    handlePromptEnqueued(evt("session.inbox.enqueued", {
+      sessionID: "ses_1", inboxID: "second", item: { type: "user", payload: { text: "second" }, delivery: "queue" },
+    }), ctx, false)
+    expect(ctx.tracing.activePrompts.get("ses_1")?.text).toBe("first\nsteering")
+    handleExecutionEnded(evt("session.execution.succeeded", { sessionID: "ses_1" }), ctx, { type: "succeeded" })
+    finalizeSession("ses_1", ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    expect(tracer.spans.at(-1)?.attributes["input.value"]).toBe("second")
+  })
 })
 
 describe("handleExecutionEnded", () => {

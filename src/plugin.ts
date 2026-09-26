@@ -4,7 +4,7 @@ import { loadConfig, parseAttributePairs, resolveHelperPath, resolveLogLevel, ty
 import { probeEndpoint } from "./probe.ts"
 import { forceFlushOtel } from "./otel.ts"
 import { remoteParentContext } from "./trace-context.ts"
-import { acquireSharedOtel, acquireTracingState, flushSharedOtel, releaseSharedOtel } from "./state.ts"
+import { acquireSharedOtel, acquireTracingState, createFlushScheduler, flushSharedOtel, releaseSharedOtel } from "./state.ts"
 import { LEVELS, type HandlerContext, type Level, type OpenCodeContext, type OpenCodeEvent } from "./types.ts"
 import { contextForSession, enqueueEvent, setBoundedMap } from "./util.ts"
 import {
@@ -74,6 +74,7 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
 
   const shared = await acquireSharedOtel(config, PLUGIN_VERSION)
   const tracing = acquireTracingState()
+  const flush = createFlushScheduler(() => forceFlushOtel(shared.providers))
   await log("info", "OTel SDK initialized")
 
   const g = globalThis as Record<string, unknown>
@@ -152,24 +153,24 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
       case "session.execution.succeeded":
         handleExecutionEnded(event, eventCtx, { type: "succeeded" })
         finalizeSession(event.data.sessionID, eventCtx)
-        await forceFlushOtel(shared.providers)
+        flush.request()
         break
       case "session.execution.failed":
         handleExecutionEnded(event, eventCtx, { type: "failed", error: event.data.error })
         finalizeSession(event.data.sessionID, eventCtx)
-        await forceFlushOtel(shared.providers)
+        flush.request()
         break
       case "session.execution.interrupted":
         handleExecutionEnded(event, eventCtx, { type: "interrupted", reason: event.data.reason })
         finalizeSession(event.data.sessionID, eventCtx)
-        await forceFlushOtel(shared.providers)
+        flush.request()
         break
       case "session.status":
         handleSessionStatus(event, eventCtx)
         break
       case "session.idle":
         handleSessionIdle(event, eventCtx)
-        await forceFlushOtel(shared.providers)
+        flush.request()
         break
       case "session.usage.updated":
         handleUsageUpdated(event, eventCtx)
@@ -237,7 +238,7 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
   return async () => {
     controller.abort()
     await running.catch(() => {})
-    await forceFlushOtel(shared.providers)
+    await flush.drain()
     await releaseSharedOtel()
   }
 }

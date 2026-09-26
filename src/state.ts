@@ -26,6 +26,14 @@ export function configKey(config: PluginConfig): string {
   return createHash("sha256").update(normalized).digest("hex")
 }
 
+export function createFlushScheduler(flush: () => Promise<void>) {
+  let pending = Promise.resolve()
+  return {
+    request() { pending = pending.then(flush, flush) },
+    drain() { return pending },
+  }
+}
+
 /**
  * Returns the process-wide shared OTel SDK instance, creating it on first use.
  * OpenCode may load one plugin instance per location, but `setGlobalMeterProvider`
@@ -115,6 +123,7 @@ export function acquireTracingState(): TracingState {
       stepOutputs: new Map(),
       pendingPrompts: new Map(),
       activePrompts: new Map(),
+      activeExecutions: new Set(),
       pendingPermissions: new Map(),
       activeLlm: new Map(),
       provisionalLlm: new Map(),
