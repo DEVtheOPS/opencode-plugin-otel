@@ -14,6 +14,7 @@ export type PluginConfig = {
   enabled: boolean
   logsEnabled: boolean
   capturePromptInLogs: boolean
+  logLevel: string | undefined
   endpoint: string
   protocol: "grpc" | "http/protobuf" | "http/json"
   metricsInterval: number
@@ -58,6 +59,7 @@ export type OtelPluginOptions = {
   enabled?: boolean
   logsEnabled?: boolean
   capturePromptInLogs?: boolean
+  logLevel?: string
   endpoint?: string
   protocol?: "grpc" | "http/protobuf" | "http/json"
   metricsInterval?: number
@@ -197,6 +199,7 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
     enabled: pickBoolean(resolvedOptions.enabled) ?? hasNonEmptyEnv("OPENCODE_ENABLE_TELEMETRY"),
     logsEnabled: pickBoolean(resolvedOptions.logsEnabled) ?? !hasNonEmptyEnv("OPENCODE_DISABLE_LOGS"),
     capturePromptInLogs: pickBoolean(resolvedOptions.capturePromptInLogs) ?? hasNonEmptyEnv("OPENCODE_CAPTURE_PROMPT_IN_LOGS"),
+    logLevel: pickString(resolvedOptions.logLevel),
     endpoint: pickString(resolvedOptions.endpoint) ?? process.env["OPENCODE_OTLP_ENDPOINT"] ?? "http://localhost:4317",
     protocol,
     metricsInterval: pickPositiveInt(resolvedOptions.metricsInterval) ?? parseEnvInt("OPENCODE_OTLP_METRICS_INTERVAL", 60000),

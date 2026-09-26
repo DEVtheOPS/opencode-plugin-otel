@@ -160,14 +160,6 @@ export function createInstruments(prefix: string): Instruments {
       unit: "USD",
       description: "Cost of the opencode session in USD",
     }),
-    linesCounter: meter.createCounter(`${prefix}lines_of_code.count`, {
-      unit: "{line}",
-      description: "Gross positive churn of lines added/removed across a session. Emits the positive delta vs. the previous session.diff; negative deltas (cumulative shrinkage) are dropped, so sums do not reconcile to net after any revert. Use lines_of_code.total for the authoritative live cumulative.",
-    }),
-    linesTotalGauge: meter.createGauge(`${prefix}lines_of_code.total`, {
-      unit: "{line}",
-      description: "Authoritative live cumulative lines added/removed for the current session. Mirrors opencode's session.diff cumulative value on every event; tracks partial and full reverts faithfully.",
-    }),
     commitCounter: meter.createCounter(`${prefix}commit.count`, {
       unit: "{commit}",
       description: "Number of git commits created",
@@ -188,13 +180,13 @@ export function createInstruments(prefix: string): Instruments {
       unit: "{message}",
       description: "Number of completed assistant messages per session",
     }),
-    sessionTokenGauge: meter.createHistogram(`${prefix}session.token.total`, {
+    sessionTokenHistogram: meter.createHistogram(`${prefix}session.token.total`, {
       unit: "tokens",
-      description: "Total tokens consumed per session, recorded as a histogram on session idle",
+      description: "Total tokens consumed per session, recorded as a histogram when an execution ends",
     }),
-    sessionCostGauge: meter.createHistogram(`${prefix}session.cost.total`, {
+    sessionCostHistogram: meter.createHistogram(`${prefix}session.cost.total`, {
       unit: "USD",
-      description: "Total cost per session in USD, recorded as a histogram on session idle",
+      description: "Total cost per session in USD, recorded as a histogram when an execution ends",
       advice: {
         explicitBucketBoundaries: [0.01, 0.05, 0.10, 0.25, 0.50, 1.00, 2.50, 5.00, 10.00, 25.00],
       },

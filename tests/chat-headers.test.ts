@@ -1,163 +1,37 @@
-import { describe, expect, test } from "bun:test"
-import { createTraceState } from "@opentelemetry/api"
-import { handleChatHeaders } from "../src/handlers/chat-headers.ts"
+import { describe, test, expect } from "bun:test"
+import { handleModelRequest } from "../src/handlers/chat-headers.ts"
 import { makeCtx } from "./helpers.ts"
 
-function makeInput(overrides: { agent?: string; modelID?: string; providerID?: string; messageID?: string } = {}) {
-  const providerID = overrides.providerID ?? "company-litellm"
-  return {
-    sessionID: "ses_1",
-    agent: overrides.agent ?? "build",
-    model: { id: overrides.modelID ?? "claude", providerID } as any,
-    provider: { source: "config", info: { id: providerID }, options: {} } as any,
-    message: { id: overrides.messageID ?? "user_1" } as any,
-  }
+const SPAN_CONTEXT = {
+  traceId: "0af7651916cd43dd8448eb211c80319c",
+  spanId: "b7ad6b7169203331",
+  traceFlags: 1,
 }
 
-function seedRequest(ctx: ReturnType<typeof makeCtx>["ctx"], overrides: { agent?: string; modelID?: string; providerID?: string } = {}) {
-  ctx.llmRequestContexts.set("ses_1:user_1", [
-    {
-      messageID: "msg_1",
-      agent: overrides.agent ?? "build",
-      modelID: overrides.modelID ?? "claude",
-      providerID: overrides.providerID ?? "company-litellm",
-      spanContext: {
-        traceId: "0af7651916cd43dd8448eb211c80319c",
-        spanId: "b7ad6b7169203331",
-        traceFlags: 1,
-      },
-    },
-  ])
-}
-
-describe("handleChatHeaders", () => {
-  test("injects traceparent for an enabled provider", () => {
+describe("handleModelRequest", () => {
+  test("injects traceparent for a configured provider", () => {
     const { ctx } = makeCtx()
-    ctx.tracePropagationProviders.add("company-litellm")
-    seedRequest(ctx)
-    const output = { headers: {} as Record<string, string> }
-
-    handleChatHeaders(makeInput(), output, ctx)
-
-    expect(output.headers.traceparent).toBe("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+    ctx.tracePropagationProviders.add("litellm")
+    ctx.tracing.activeLlm.set("ses_1", { agent: "build", modelID: "m", providerID: "litellm", spanContext: SPAN_CONTEXT })
+    const headers: Record<string, string> = {}
+    handleModelRequest({ sessionID: "ses_1", agent: "build", model: { providerID: "litellm", id: "m" }, kind: "primary", headers }, ctx)
+    expect(headers["traceparent"]).toBe("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
   })
 
-  test("injects tracestate when present", () => {
+  test("does nothing when the provider is not configured", () => {
     const { ctx } = makeCtx()
-    ctx.tracePropagationProviders.add("company-litellm")
-    seedRequest(ctx)
-    ctx.llmRequestContexts.get("ses_1:user_1")![0]!.spanContext.traceState = createTraceState("vendor=value")
-    const output = { headers: {} as Record<string, string> }
-
-    handleChatHeaders(makeInput(), output, ctx)
-
-    expect(output.headers.tracestate).toBe("vendor=value")
+    ctx.tracing.activeLlm.set("ses_1", { agent: "build", modelID: "m", providerID: "openai", spanContext: SPAN_CONTEXT })
+    const headers: Record<string, string> = {}
+    handleModelRequest({ sessionID: "ses_1", agent: "build", model: { providerID: "openai", id: "m" }, kind: "primary", headers }, ctx)
+    expect(headers["traceparent"]).toBeUndefined()
   })
 
-  test("supports an explicit wildcard", () => {
+  test("supports the wildcard provider", () => {
     const { ctx } = makeCtx()
     ctx.tracePropagationProviders.add("*")
-    seedRequest(ctx)
-    const output = { headers: {} as Record<string, string> }
-
-    handleChatHeaders(makeInput(), output, ctx)
-
-    expect(output.headers.traceparent).toBeDefined()
-  })
-
-  test("does not inject for an unconfigured provider", () => {
-    const { ctx } = makeCtx()
-    seedRequest(ctx)
-    const output = { headers: {} as Record<string, string> }
-
-    handleChatHeaders(makeInput(), output, ctx)
-
-    expect(output.headers).toEqual({})
-  })
-
-  test("does not inject without a matching live request", () => {
-    const { ctx } = makeCtx()
-    ctx.tracePropagationProviders.add("company-litellm")
-    const output = { headers: {} as Record<string, string> }
-
-    handleChatHeaders(makeInput(), output, ctx)
-
-    expect(output.headers).toEqual({})
-  })
-
-  test("does not attach a concurrent title request to the main span", () => {
-    const { ctx } = makeCtx()
-    ctx.tracePropagationProviders.add("company-litellm")
-    seedRequest(ctx)
-    const output = { headers: {} as Record<string, string> }
-
-    handleChatHeaders(makeInput({ agent: "title" }), output, ctx)
-
-    expect(output.headers).toEqual({})
-  })
-
-  test("selects each concurrently live request by agent, model, and provider", () => {
-    const { ctx } = makeCtx()
-    ctx.tracePropagationProviders.add("*")
-    seedRequest(ctx)
-    ctx.llmRequestContexts.get("ses_1:user_1")!.push({
-      messageID: "msg_2",
-      agent: "review",
-      modelID: "gpt-5",
-      providerID: "company-openai",
-      spanContext: {
-        traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-        spanId: "00f067aa0ba902b7",
-        traceFlags: 1,
-      },
-    })
-    const buildOutput = { headers: {} as Record<string, string> }
-    const reviewOutput = { headers: {} as Record<string, string> }
-
-    handleChatHeaders(makeInput(), buildOutput, ctx)
-    handleChatHeaders(
-      makeInput({ agent: "review", modelID: "gpt-5", providerID: "company-openai" }),
-      reviewOutput,
-      ctx,
-    )
-
-    expect(buildOutput.headers.traceparent).toContain("0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331")
-    expect(reviewOutput.headers.traceparent).toContain("4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7")
-  })
-
-  test("selects the newest live request when metadata is identical", () => {
-    const { ctx } = makeCtx()
-    ctx.tracePropagationProviders.add("company-litellm")
-    seedRequest(ctx)
-    ctx.llmRequestContexts.get("ses_1:user_1")!.push({
-      messageID: "msg_2",
-      agent: "build",
-      modelID: "claude",
-      providerID: "company-litellm",
-      spanContext: {
-        traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-        spanId: "00f067aa0ba902b7",
-        traceFlags: 1,
-      },
-    })
-    const output = { headers: {} as Record<string, string> }
-
-    handleChatHeaders(makeInput(), output, ctx)
-
-    expect(output.headers.traceparent).toBe("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
-  })
-
-  test("requires matching model and provider metadata", () => {
-    const { ctx } = makeCtx()
-    ctx.tracePropagationProviders.add("*")
-    seedRequest(ctx)
-    const modelOutput = { headers: {} as Record<string, string> }
-    const providerOutput = { headers: {} as Record<string, string> }
-
-    handleChatHeaders(makeInput({ modelID: "other" }), modelOutput, ctx)
-    handleChatHeaders(makeInput({ providerID: "other" }), providerOutput, ctx)
-
-    expect(modelOutput.headers).toEqual({})
-    expect(providerOutput.headers).toEqual({})
+    ctx.tracing.activeLlm.set("ses_1", { agent: "build", modelID: "m", providerID: "vllm", spanContext: SPAN_CONTEXT })
+    const headers: Record<string, string> = {}
+    handleModelRequest({ sessionID: "ses_1", agent: "build", model: { providerID: "vllm", id: "m" }, kind: "primary", headers }, ctx)
+    expect(headers["traceparent"]).toBeDefined()
   })
 })

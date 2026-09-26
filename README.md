@@ -9,6 +9,12 @@
 
 An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemetry (OTLP over gRPC or HTTP/protobuf), mirroring the same signals as [Claude Code's monitoring](https://code.claude.com/docs/en/monitoring-usage).
 
+> **OpenCode V2 only.** Version `2.x` of this plugin targets **OpenCode `>=2`** and exports the V2
+> `Plugin.define`-style default export (`id: "devtheops.otel"`). The OpenCode V1 plugin is maintained
+> on the [`v1` branch](https://github.com/DEVtheOPS/opencode-plugin-otel/tree/v1) and the `1.x` release
+> line. See [OpenCode version support](#opencode-version-support).
+
+- [OpenCode version support](#opencode-version-support)
 - [What it instruments](#what-it-instruments)
   - [Metrics](#metrics)
   - [Log events](#log-events)
@@ -29,6 +35,24 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 - [Local development](#local-development)
 - [GitHub Discord notifications](#github-discord-notifications)
 
+## OpenCode version support
+
+| Plugin line | OpenCode | Config key | Entrypoint |
+|-------------|----------|------------|------------|
+| `2.x` (`main`) | V2 (`>=2`) | `plugins` | default export `{ id, setup }` |
+| `1.x` (`v1` branch) | V1 | `plugin` | named `OtelPlugin` export |
+
+OpenCode V2 replaced the coarse V1 event stream (`message.updated`, `message.part.updated`,
+`permission.*`, `command.executed`, `session.diff`) with a granular taxonomy
+(`session.execution.*`, `session.step.*`, `session.tool.*`, `session.usage.updated`,
+`session.retry.scheduled`). This plugin consumes the V2 stream directly, which produces more
+accurate LLM and tool span timings than the V1 implementation.
+
+**Signals not available in V2:** the `lines_of_code.count` / `lines_of_code.total` metrics relied on the
+V1 `session.diff` event and are not emitted (the V2 plugin context does not expose a session diff).
+`command.executed`-based instrumentation is also gone; git commit detection is preserved by inspecting
+shell tool input. Message/part spans are replaced by richer per-step LLM spans.
+
 ## What it instruments
 
 ### Metrics
@@ -36,19 +60,18 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 | Metric | Type | Description |
 |--------|------|-------------|
 | `opencode.session.count` | Counter | Incremented on each `session.created` event |
-| `opencode.token.usage` | Counter | Per token type: `input`, `output`, `reasoning`, `cacheRead`, `cacheCreation` |
-| `opencode.cost.usage` | Counter | USD cost per completed assistant message |
-| `opencode.lines_of_code.count` | Counter | **Gross positive churn, not a net total.** Emits the positive delta of `additions`/`deletions` since the previous `session.diff` for the same session; negative deltas (when opencode's cumulative `additions` or `deletions` shrinks vs. the last event) are dropped. Summing the counter therefore reports gross lines added/removed across forward transitions — it does *not* reconcile back to the session's current state after any revert (full or partial). Intra-message rewrites that opencode collapses in its per-message cumulative are not visible here at all. Use `opencode.lines_of_code.total` for the authoritative live cumulative. |
-| `opencode.lines_of_code.total` | Gauge | **Authoritative live cumulative lines added/removed for the session.** Refreshed on every `session.diff` with opencode's current cumulative value. Drops back to `0` if opencode reports a revert to baseline, and tracks partial reverts faithfully. Query this (not the counter) to answer "what does this session currently amount to". |
-| `opencode.commit.count` | Counter | Git commits detected via bash tool |
+| `opencode.token.usage` | Counter | Per token type: `input`, `output`, `reasoning`, `cacheRead`, `cacheCreation` (per `session.step.ended`) |
+| `opencode.cost.usage` | Counter | USD cost per completed LLM step |
+| `opencode.commit.count` | Counter | Git commits detected via shell tool input |
 | `opencode.tool.duration` | Histogram | Tool execution time in milliseconds |
-| `opencode.cache.count` | Counter | Cache activity per message: `type=cacheRead` or `type=cacheCreation` |
+| `opencode.cache.count` | Counter | Cache activity per step: `type=cacheRead` or `type=cacheCreation` |
 | `opencode.session.duration` | Histogram | Session duration from created to idle in milliseconds |
 | `opencode.message.count` | Counter | Completed assistant messages per session |
-| `opencode.session.token.total` | Histogram | Total tokens consumed per session, recorded on idle |
-| `opencode.session.cost.total` | Histogram | Total cost per session in USD, recorded on idle |
+| `opencode.session.token.total` | Histogram | Total tokens consumed per session, recorded when an execution ends |
+| `opencode.session.cost.total` | Histogram | Total cost per session in USD, recorded when an execution ends |
 | `opencode.model.usage` | Counter | Messages per model and provider |
-| `opencode.retry.count` | Counter | API retries observed via `session.status` events |
+| `opencode.retry.count` | Counter | API retries observed via `session.retry.scheduled` / `session.status` |
+| `opencode.subtask.count` | Counter | Sub-agent sessions observed via `session.created` with a `parentID` |
 
 ### Log events
 
@@ -56,10 +79,10 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 |-------|-------------|
 | `session.created` | Session started |
 | `session.idle` | Session went idle (includes total tokens, cost, messages) |
-| `session.error` | Session error |
-| `user_prompt` | User sent a message (includes `prompt_length`, `model`, `agent`; also `prompt` when `OPENCODE_CAPTURE_PROMPT_IN_LOGS` is set) |
-| `api_request` | Completed assistant message (tokens, cost, duration) |
-| `api_error` | Failed assistant message (error summary, duration) |
+| `session.error` | Execution failed |
+| `user_prompt` | User sent a message (includes `prompt_length`, `delivery`; also `prompt` when `OPENCODE_CAPTURE_PROMPT_IN_LOGS` is set) |
+| `api_request` | Completed LLM step (tokens, cost) |
+| `api_error` | Failed LLM step (error summary) |
 | `tool_result` | Tool completed or errored (duration, success, output size) |
 | `tool_decision` | Permission prompt answered (accept/reject) |
 | `commit` | Git commit detected |
@@ -71,7 +94,7 @@ Add the plugin to your opencode config at `~/.config/opencode/opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@devtheops/opencode-plugin-otel"]
+  "plugins": ["@devtheops/opencode-plugin-otel"]
 }
 ```
 
@@ -80,7 +103,7 @@ Or point directly at a local checkout for development:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["/path/to/opencode-plugin-otel/src/index.ts"]
+  "plugins": [{ "package": "/path/to/opencode-plugin-otel/src/index.ts" }]
 }
 ```
 
@@ -115,20 +138,23 @@ Prompt logging remains disabled by default. Enable it only when the configured t
 
 ### Plugin options (opencode.json)
 
-Every setting can also be passed inline through opencode's plugin **tuple form**, so nothing has to be exported in a shell. Options take precedence over the matching `OPENCODE_*` environment variable, which in turn wins over the built-in default.
+Every setting can also be passed inline through opencode's plugin **object form**, so nothing has to be exported in a shell. Options take precedence over the matching `OPENCODE_*` environment variable, which in turn wins over the built-in default.
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    ["@devtheops/opencode-plugin-otel", {
-      "enabled": true,
-      "endpoint": "http://localhost:4317",
-      "protocol": "grpc",
-      "metricPrefix": "claude_code.",
-      "resourceAttributes": "service.version=1.2.3,deployment.environment=production",
-      "disabledTraces": ["tool"]
-    }]
+  "plugins": [
+    {
+      "package": "@devtheops/opencode-plugin-otel",
+      "options": {
+        "enabled": true,
+        "endpoint": "http://localhost:4317",
+        "protocol": "grpc",
+        "metricPrefix": "claude_code.",
+        "resourceAttributes": "service.version=1.2.3,deployment.environment=production",
+        "disabledTraces": ["tool"]
+      }
+    }
   ]
 }
 ```
@@ -140,6 +166,7 @@ Option keys mirror the resolved config and map to the environment variables:
 | `enabled` | `OPENCODE_ENABLE_TELEMETRY` |
 | `logsEnabled` | `OPENCODE_DISABLE_LOGS` (inverted) |
 | `capturePromptInLogs` | `OPENCODE_CAPTURE_PROMPT_IN_LOGS` |
+| `logLevel` | *(none — option only)*: `debug`, `info`, `warn`, `error` |
 | `endpoint` | `OPENCODE_OTLP_ENDPOINT` |
 | `protocol` | `OPENCODE_OTLP_PROTOCOL` |
 | `metricsInterval` | `OPENCODE_OTLP_METRICS_INTERVAL` |
@@ -240,9 +267,6 @@ export OPENCODE_DISABLE_METRICS="retry.count"
 
 # Disable multiple metrics
 export OPENCODE_DISABLE_METRICS="cache.count,session.duration,session.token.total,session.cost.total,model.usage,retry.count,message.count"
-
-# Disable the new per-session cumulative gauge while keeping the delta counter
-export OPENCODE_DISABLE_METRICS="lines_of_code.total"
 ```
 
 #### opencode-only metrics

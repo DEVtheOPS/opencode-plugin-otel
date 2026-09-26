@@ -5,8 +5,6 @@
   },
   "dependencies": {
     "@arizeai/openinference-semantic-conventions": "^2.2.0",
-    "@opencode-ai/plugin": "^1.14.20",
-    "@opencode-ai/sdk": "^1.14.20",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/core": "^2.8.0",
     "@opentelemetry/exporter-logs-otlp-grpc": "^0.213.0",
@@ -26,6 +24,7 @@
   },
   "description": "OpenTelemetry telemetry plugin for opencode CLI",
   "devDependencies": {
+    "@opencode/plugin": "^2.0.18",
     "@types/bun": "latest",
     "@typescript-eslint/parser": "^8.62.0",
     "eslint": "^9.24.0",
@@ -61,6 +60,14 @@
   "oc-plugin": [
     "server"
   ],
+  "peerDependencies": {
+    "@opencode/plugin": ">=2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode/plugin": {
+      "optional": true
+    }
+  },
   "publishConfig": {
     "access": "public"
   },
