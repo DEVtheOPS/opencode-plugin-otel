@@ -42,55 +42,61 @@ export function handleToolInputStarted(e: EventOf<"session.tool.input.started">,
   })
 }
 
-/** Attaches tool input to the span and retains the command for terminal commit detection. */
+/** Starts timing and tracing an observed tool call, and retains the command for commit detection. */
 export function handleToolCalled(e: EventOf<"session.tool.called">, ctx: HandlerContext) {
   const d = e.data
   const meta = ctx.tracing.toolMeta.get(d.id)
-  const isSubagent = meta?.tool === "subagent"
-  const runs = d.executed
-  const { agentName, agentType } = getSessionAgentMeta(d.sessionID, ctx)
-  const inputJson = safeJson(d.input)
-  if (meta && (runs || isSubagent)) {
-    setBoundedMap(ctx.tracing.toolMeta, d.id, {
-      ...meta,
-      startMs: e.created,
-      executionStarted: runs,
-      ...(isSubagent && typeof d.input["agent"] === "string" ? { agent: d.input["agent"] } : {}),
-    })
-  }
+  if (!meta) return
+  const isSubagent = meta.tool === "subagent"
+  setBoundedMap(ctx.tracing.toolMeta, d.id, {
+    ...meta,
+    startMs: e.created,
+    executionStarted: true,
+    ...(isSubagent && typeof d.input["agent"] === "string" ? { agent: d.input["agent"] } : {}),
+    ...(typeof d.input["command"] === "string" ? { command: d.input["command"] } : {}),
+  })
 
-  const span = runs && meta && isTraceEnabled("tool", ctx)
-    ? ctx.tracer.startSpan(
-        `${ctx.tracePrefix}tool.${meta.tool}`,
-        {
-          startTime: e.created,
-          kind: SpanKind.INTERNAL,
-          attributes: {
-            [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.TOOL,
-            [SESSION_ID]: d.sessionID,
-            [TOOL_ID]: d.id,
-            [TOOL_NAME]: meta.tool,
-            ...ctx.commonAttrs,
-          },
+  if (!isTraceEnabled("tool", ctx)) return
+  if (isSubagent) startSubagentSpan(d.id, ctx)
+  else {
+    const span = ctx.tracer.startSpan(
+      `${ctx.tracePrefix}tool.${meta.tool}`,
+      {
+        startTime: e.created,
+        kind: SpanKind.INTERNAL,
+        attributes: {
+          [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.TOOL,
+          [SESSION_ID]: d.sessionID,
+          [TOOL_ID]: d.id,
+          [TOOL_NAME]: meta.tool,
+          ...ctx.commonAttrs,
         },
-        resolveStepContext(d.sessionID, d.assistantMessageID, ctx),
-      )
-    : undefined
-  if (span) {
+      },
+      resolveStepContext(d.sessionID, d.assistantMessageID, ctx),
+    )
     setBoundedMap(ctx.tracing.toolSpans, d.id, span)
     setBoundedMap(ctx.tracing.toolSpanContexts, d.id, span.spanContext())
-    span.setAttributes({
-      [TOOL_PARAMETERS]: inputJson,
-      [INPUT_VALUE]: inputJson,
-      [INPUT_MIME_TYPE]: MimeType.JSON,
-      [AGENT_NAME]: agentName,
-      "agent.type": agentType,
-    })
   }
 
-  if (meta && typeof d.input["command"] === "string") {
-    setBoundedMap(ctx.tracing.toolMeta, d.id, { ...ctx.tracing.toolMeta.get(d.id)!, command: d.input["command"] })
-  }
+  const { agentName, agentType } = getSessionAgentMeta(d.sessionID, ctx)
+  const inputJson = safeJson(d.input)
+  ctx.tracing.toolSpans.get(d.id)?.setAttributes({
+    [TOOL_PARAMETERS]: inputJson,
+    [INPUT_VALUE]: inputJson,
+    [INPUT_MIME_TYPE]: MimeType.JSON,
+    [AGENT_NAME]: agentName,
+    "agent.type": agentType,
+    "tool.provider_executed": isProviderExecuted(d),
+  })
+}
+
+type ProviderExecution = {
+  readonly executed?: boolean
+  readonly provider?: { readonly executed?: boolean }
+}
+
+function isProviderExecuted(data: ProviderExecution): boolean {
+  return data.provider?.executed ?? data.executed ?? false
 }
 
 function startSubagentSpan(callID: string, ctx: HandlerContext) {
@@ -140,14 +146,14 @@ export function handleToolProgress(e: EventOf<"session.tool.progress">, ctx: Han
 export function handleToolSuccess(e: EventOf<"session.tool.success">, ctx: HandlerContext) {
   linkSubagent(e.data.id, e.data.metadata?.["sessionID"], ctx)
   const output = contentText(e.data.content)
-  finishTool(e.data.id, e.data.sessionID, e.created, true, e.data.executed, output, undefined, ctx)
+  finishTool(e.data.id, e.data.sessionID, e.created, true, output, undefined, ctx)
 }
 
 /** Ends a failed tool call: records duration, sets error attributes, and emits `tool_result`. */
 export function handleToolFailed(e: EventOf<"session.tool.failed">, ctx: HandlerContext) {
   linkSubagent(e.data.id, e.data.metadata?.["sessionID"], ctx)
   const output = contentText(e.data.content)
-  finishTool(e.data.id, e.data.sessionID, e.created, false, e.data.executed, output, errorSummary(e.data.error), ctx)
+  finishTool(e.data.id, e.data.sessionID, e.created, false, output, errorSummary(e.data.error), ctx)
 }
 
 function finishTool(
@@ -155,7 +161,6 @@ function finishTool(
   sessionID: string,
   endMs: number,
   success: boolean,
-  executed: boolean,
   output: string,
   error: string | undefined,
   ctx: HandlerContext,
@@ -163,13 +168,13 @@ function finishTool(
   const meta = ctx.tracing.toolMeta.get(callID)
   ctx.tracing.toolMeta.delete(callID)
   const tool = meta?.tool ?? "unknown"
-  const observedExecution = executed || (tool === "subagent" && meta?.executionStarted === true)
-  const start = observedExecution && meta?.executionStarted ? meta.startMs : endMs
+  const observedExecution = meta?.executionStarted === true
+  const start = observedExecution ? meta.startMs : endMs
   const durationMs = Math.max(0, endMs - start)
   const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
   const sizeBytes = output ? Buffer.byteLength(output, "utf8") : 0
 
-  if (success && executed && meta?.command && SHELL_TOOL_RE.test(tool) && GIT_COMMIT_RE.test(meta.command)) {
+  if (success && observedExecution && meta.command && SHELL_TOOL_RE.test(tool) && GIT_COMMIT_RE.test(meta.command)) {
     if (isMetricEnabled("commit.count", ctx)) {
       ctx.instruments.commitCounter.add(1, { ...ctx.commonAttrs, "session.id": sessionID })
     }
