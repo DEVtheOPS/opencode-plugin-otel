@@ -57,6 +57,8 @@ describe("disabled traces", () => {
     handleToolInputStarted(evt("session.tool.input.started", { ...call, name: "shell" }, 1000), ctx)
     handleToolCalled(evt("session.tool.called", { ...call, input: { command: "git commit -m 'test'" } }, 2000), ctx)
     expect(tracer.spans.map((s) => s.name)).toEqual(["opencode.session"])
+    expect(counters.commit.calls).toHaveLength(0)
+    expect(logger.records.filter((record) => record.body === "commit")).toHaveLength(0)
     handleToolSuccess(evt("session.tool.success", { ...call, content: [{ type: "text", text: "committed" }] }, 2250), ctx)
     expect(tracer.spans.map((s) => s.name)).toEqual(["opencode.session"])
     expect(histograms.tool.calls).toHaveLength(1)
