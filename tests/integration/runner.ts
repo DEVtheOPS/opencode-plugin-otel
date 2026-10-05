@@ -52,4 +52,4 @@ if (!messages.some(message => message.type === "idle" && message.outcome === "su
 }
 await host.close()
 await flushSharedOtel()
-console.log(JSON.stringify({ sessionID: session.id, messages }))
+await Bun.write(`${directory}/result.json`, JSON.stringify({ sessionID: session.id, messages }))

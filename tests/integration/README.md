@@ -13,7 +13,7 @@ Two temporary HTTP servers bind to loopback on automatically assigned ports:
 
 Each subprocess gets its own temporary Git project, database, home, and XDG directories. It inherits only environment variables needed to launch processes, not provider credentials or telemetry configuration. Model catalog fetching and project config discovery are disabled, and the fixture provider is selected explicitly. Keep the SDK and plugin development dependency versions aligned to avoid duplicate OpenCode runtime modules.
 
-The runner waits for session completion, drains plugin processing during host cleanup, and explicitly flushes telemetry before exiting. Receivers stay alive until the runner exits. A 30-second process deadline prevents hangs. Runner errors include stdout, stderr, model requests, and received payloads; temporary files and servers are cleaned up afterwards.
+The runner waits for session completion, drains plugin processing during host cleanup, and explicitly flushes telemetry before exiting. Structured results use an awaited file write rather than stdout, avoiding truncated JSON when a subprocess exits with buffered console output on Linux. The read fixture exercises results larger than 8 KiB. Receivers stay alive until the runner exits. A 30-second process deadline prevents hangs. Runner errors include stdout, stderr, model requests, and received payloads; temporary files and servers are cleaned up afterwards.
 
 ## Coverage
 

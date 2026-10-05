@@ -42,6 +42,8 @@ for (const disabled of [false, true]) {
       const tool = objects(scenario.result["messages"])
         .flatMap(message => objects(message["content"])).find(part => part["type"] === "tool")!
       expect(tool["executed"]).toBe(false)
+      expect(JSON.stringify(scenario.result).length).toBeGreaterThan(8192)
+      expect(result["content"]).toContain("256: integration-fixture-contents")
       const logs = signalRecords(scenario.received["logs"]!, "Logs")
       const log = logs.find(record => attributes(record)["event.name"] === "tool_result")!
       expect(attributes(log)["tool_name"]).toBe("read")

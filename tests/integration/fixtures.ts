@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -67,7 +67,7 @@ export async function runScenario(scenario: "text" | "read", disabledTraces = ""
   let timedOut = false
   try {
     await mkdir(join(directory, "config"))
-    await writeFile(join(directory, "fixture.txt"), "integration-fixture-contents\n")
+    await writeFile(join(directory, "fixture.txt"), "integration-fixture-contents\n".repeat(256))
     const env: Record<string, string> = {}
     for (const key of ["PATH", "SystemRoot", "TMPDIR", "TEMP", "TMP"]) {
       if (process.env[key]) env[key] = process.env[key]!
@@ -102,8 +102,12 @@ export async function runScenario(scenario: "text" | "read", disabledTraces = ""
     if (timedOut || code !== 0 || failures.length) {
       throw new Error(JSON.stringify({ timedOut, code, output, errors, failures, requests, received }, null, 2))
     }
-    const result = output.trim().split("\n").at(-1)!
-    return { received, requests, result: JSON.parse(result) as Payload, output, errors }
+    try {
+      const result = JSON.parse(await readFile(join(directory, "result.json"), "utf8")) as Payload
+      return { received, requests, result, output, errors }
+    } catch (error) {
+      throw new Error(JSON.stringify({ error: String(error), output, errors, requests, received }, null, 2))
+    }
   } finally {
     if (timer) clearTimeout(timer)
     if (child) { child.kill(); await child.exited }
