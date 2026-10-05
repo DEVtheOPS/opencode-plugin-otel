@@ -24,7 +24,8 @@
   },
   "description": "OpenTelemetry telemetry plugin for opencode CLI",
   "devDependencies": {
-    "@opencode/plugin": "^2.0.18",
+    "@opencode/plugin": "2.0.20",
+    "@opencode/sdk": "2.0.20",
     "@types/bun": "latest",
     "@typescript-eslint/parser": "^8.62.0",
     "eslint": "^9.24.0",
@@ -80,6 +81,7 @@
     "check:jsdoc-coverage": "bun scripts/check-jsdoc-coverage.mjs",
     "lint": "bun --bun eslint .",
     "prepack": "bun run build",
+    "test:integration": "bun test tests/integration",
     "typecheck": "tsc --noEmit"
   },
   "type": "module",
