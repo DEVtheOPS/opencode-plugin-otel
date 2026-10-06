@@ -56,7 +56,7 @@ for (const disabled of [false, true]) {
           .some(span => String(span["name"]).startsWith("opencode.tool."))).toBe(false)
       })
     } else {
-      test.failing("#134: exports a locally executed tool span under its LLM span", () => {
+      test("#134: exports a locally executed tool span under its LLM span", () => {
         const spans = signalRecords(scenario.received["traces"]!, "Spans")
         const tool = spans.find(span => span["name"] === "opencode.tool.read")
         expect(tool).toBeDefined()
@@ -67,7 +67,7 @@ for (const disabled of [false, true]) {
       })
     }
 
-    test.failing("#134: exports a duration sample for the locally executed tool", () => {
+    test("#134: exports a duration sample for the locally executed tool", () => {
       const metrics = signalRecords(scenario.received["metrics"]!, "Metrics")
       const points = metricPoints(metrics, "opencode.tool.duration", "histogram")
         .filter(point => attributes(point)["tool_name"] === "read")

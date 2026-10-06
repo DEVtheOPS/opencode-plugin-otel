@@ -16,7 +16,7 @@ describe("trace nesting", () => {
       ctx,
     )
     handleToolInputStarted(evt("session.tool.input.started", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_1", name: "read" }), ctx)
-    handleToolCalled(evt("session.tool.called", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_1", input: {}, executed: true }), ctx)
+    handleToolCalled(evt("session.tool.called", { sessionID: "ses_1", assistantMessageID: "msg_1", id: "call_1", input: {}, executed: false }), ctx)
 
     const run = tracer.spans.find((s) => s.name === "opencode.session")!
     const step = tracer.spans.find((s) => s.name === "opencode.llm")!
