@@ -18,6 +18,7 @@ import {
   isTraceEnabled,
   markSeen,
   modelRef,
+  resolveRunContext,
   resolveSubagentTraceContext,
   setBoundedMap,
   totalTokens,
@@ -51,6 +52,7 @@ export function handlePromptEnqueued(e: EventOf<"session.inbox.enqueued">, ctx: 
     timestamp: e.created,
     observedTimestamp: Date.now(),
     body: "user_prompt",
+    context: resolveRunContext(sessionID, ctx),
     attributes: {
       "event.name": "user_prompt",
       "session.id": sessionID,
@@ -236,6 +238,7 @@ export function handleExecutionEnded(
 ) {
   const sessionID = e.data.sessionID
   const totals = ctx.tracing.sessionTotals.get(sessionID)
+  const logContext = resolveRunContext(sessionID, ctx)
   ctx.tracing.activeExecutions.delete(sessionID)
   const pendingDispatch = ctx.tracing.subagentParents.get(sessionID)
   if (pendingDispatch) {
@@ -279,6 +282,7 @@ export function handleExecutionEnded(
       timestamp: e.created,
       observedTimestamp: Date.now(),
       body: "session.error",
+      context: logContext,
       attributes: {
         "event.name": "session.error",
         "session.id": sessionID,

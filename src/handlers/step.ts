@@ -34,6 +34,7 @@ import {
   isTraceEnabled,
   markSeen,
   resolveRunContext,
+  resolveStepContext,
   setBoundedMap,
 } from "../util.ts"
 
@@ -170,6 +171,7 @@ export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerCo
   const providerID = meta?.providerID ?? "unknown"
   const durationMs = Math.max(0, e.created - (meta?.startMs ?? e.created))
 
+  const logContext = resolveStepContext(d.sessionID, d.assistantMessageID, ctx)
   recordUsageMetrics(d.sessionID, modelID, agent, d.tokens, d.cost, ctx)
   const firstStep = countMessage(d.assistantMessageID, d.sessionID, modelID, providerID, agent, ctx)
   accumulateTotals(d.sessionID, allTokens(d.tokens), d.cost, firstStep, ctx)
@@ -207,6 +209,7 @@ export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerCo
     timestamp: e.created,
     observedTimestamp: Date.now(),
     body: "api_request",
+    context: logContext,
     attributes: {
       "event.name": "api_request",
       "session.id": d.sessionID,
@@ -238,6 +241,7 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
   const error = errorSummary(d.error)
   const durationMs = Math.max(0, e.created - (meta?.startMs ?? e.created))
 
+  const logContext = resolveStepContext(d.sessionID, d.assistantMessageID, ctx)
   recordUsageMetrics(d.sessionID, modelID, agent, d.tokens, d.cost, ctx)
   const firstStep = countMessage(d.assistantMessageID, d.sessionID, modelID, providerID, agent, ctx)
   accumulateTotals(d.sessionID, allTokens(d.tokens), d.cost ?? 0, firstStep, ctx)
@@ -272,6 +276,7 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
     timestamp: e.created,
     observedTimestamp: Date.now(),
     body: "api_error",
+    context: logContext,
     attributes: {
       "event.name": "api_error",
       "session.id": d.sessionID,

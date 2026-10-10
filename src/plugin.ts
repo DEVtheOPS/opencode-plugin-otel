@@ -88,7 +88,7 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
 
   const emitLog: HandlerContext["emitLog"] = (record) => {
     if (!config.logsEnabled) return
-    shared.logger.emit(record)
+    shared.logger.emit({ ...record, context: record.context ?? ROOT_CONTEXT })
   }
 
   const remoteContext = remoteParentContext(config.traceparent, config.tracestate)
