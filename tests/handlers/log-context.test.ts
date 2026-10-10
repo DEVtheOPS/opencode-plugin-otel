@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { trace } from "@opentelemetry/api"
 import { InMemoryLogRecordExporter, LoggerProvider, SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs"
-import { handleExecutionEnded, handleExecutionStarted, handleSessionCreated } from "../../src/handlers/session.ts"
+import { finalizeSession, handleExecutionEnded, handleExecutionStarted, handlePromptEnqueued, handleSessionCreated } from "../../src/handlers/session.ts"
 import { handleStepEnded, handleStepFailed, handleStepStarted } from "../../src/handlers/step.ts"
 import { handleToolCalled, handleToolFailed, handleToolInputStarted, handleToolSuccess } from "../../src/handlers/tool.ts"
 import { evt, makeCtx, tokens } from "../helpers.ts"
@@ -18,6 +18,51 @@ function seed(ctx: ReturnType<typeof makeCtx>["ctx"], sessionID = "session", mes
 }
 
 describe("native log trace context", () => {
+  test("keeps a queued prompt uncorrelated with the preceding execution", () => {
+    const { ctx, logger, tracer } = makeCtx()
+    seed(ctx)
+    const previousRun = ctx.tracing.runSpans.get("session")!
+    handlePromptEnqueued(evt("session.inbox.enqueued", {
+      sessionID: "session", inboxID: "queued",
+      item: { type: "user", payload: { text: "next execution" }, delivery: "queue" },
+    }), ctx, false)
+    const record = logger.records.at(-1)!
+    expect(record.body).toBe("user_prompt")
+    expect(record.context).toBeUndefined()
+    handleExecutionEnded(evt("session.execution.succeeded", { sessionID: "session" }), ctx, { type: "succeeded" })
+    finalizeSession("session", ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "session" }), ctx)
+    const nextRun = tracer.spans.at(-1)!
+    expect(nextRun.attributes["input.value"]).toBe("next execution")
+    expect(nextRun.spanContext().spanId).not.toBe(previousRun.spanContext().spanId)
+    expect(record.context).toBeUndefined()
+  })
+
+  test("correlates a steering prompt with its active execution", () => {
+    const { ctx, logger } = makeCtx()
+    seed(ctx)
+    handlePromptEnqueued(evt("session.inbox.enqueued", {
+      sessionID: "session", inboxID: "steering",
+      item: { type: "user", payload: { text: "adjust current execution" }, delivery: "steer" },
+    }), ctx, false)
+    expect(trace.getSpanContext(logger.records.at(-1)!.context!)).toEqual(
+      ctx.tracing.runSpans.get("session")!.spanContext(),
+    )
+    expect(ctx.tracing.activePrompts.get("session")?.text).toBe("adjust current execution")
+    expect(ctx.tracing.pendingPrompts.has("session")).toBe(false)
+  })
+
+  test("leaves a steering prompt without an active execution uncorrelated", () => {
+    const { ctx, logger } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "session", agent: "build" }), ctx)
+    handlePromptEnqueued(evt("session.inbox.enqueued", {
+      sessionID: "session", inboxID: "initial",
+      item: { type: "user", payload: { text: "start execution" }, delivery: "steer" },
+    }), ctx, false)
+    expect(logger.records.at(-1)!.context).toBeUndefined()
+    expect(ctx.tracing.pendingPrompts.get("session")?.[0]?.text).toBe("start execution")
+  })
+
   for (const failed of [false, true]) {
     test(`captures the completed LLM context before cleanup (${failed ? "failure" : "success"})`, () => {
       const { ctx, logger, tracer } = makeCtx()

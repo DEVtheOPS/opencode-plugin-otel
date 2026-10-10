@@ -34,7 +34,8 @@ export function handlePromptEnqueued(e: EventOf<"session.inbox.enqueued">, ctx: 
   for (const agent of item.payload.agents ?? []) parts.push(agent.name)
   for (const skill of item.payload.skills ?? []) parts.push(skill.name)
   const text = parts.filter(Boolean).join("\n")
-  if (item.delivery === "steer" && ctx.tracing.activeExecutions.has(sessionID)) {
+  const steeringActiveExecution = item.delivery === "steer" && ctx.tracing.activeExecutions.has(sessionID)
+  if (steeringActiveExecution) {
     const active = ctx.tracing.activePrompts.get(sessionID)
     setBoundedMap(ctx.tracing.activePrompts, sessionID, {
       text: active?.text ? `${active.text}\n${text}` : text,
@@ -52,7 +53,7 @@ export function handlePromptEnqueued(e: EventOf<"session.inbox.enqueued">, ctx: 
     timestamp: e.created,
     observedTimestamp: Date.now(),
     body: "user_prompt",
-    context: resolveRunContext(sessionID, ctx),
+    ...(steeringActiveExecution ? { context: resolveRunContext(sessionID, ctx) } : {}),
     attributes: {
       "event.name": "user_prompt",
       "session.id": sessionID,
