@@ -8,6 +8,7 @@ import {
   handlePromptEnqueued,
   handleSessionCreated,
   handleSessionIdle,
+  handleSessionRenamed,
   handleSessionStatus,
   handleRetryScheduled,
   handleUsageUpdated,
@@ -245,5 +246,74 @@ describe("handleSessionIdle", () => {
     finalizeSession("ses_1", ctx)
     finalizeSession("ses_1", ctx)
     expect(histograms.sessionDuration.calls).toHaveLength(1)
+  })
+})
+
+describe("session title", () => {
+  test("puts a title known at creation on the run span", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1", title: "Fix the flaky test" }), ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    expect(tracer.spans[0]!.attributes["session.title"]).toBe("Fix the flaky test")
+  })
+
+  test("puts the title on a subagent run span", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1" }), ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    handleSessionCreated(evt("session.created", { sessionID: "sub_1", parentID: "ses_1", title: "Explore the repo" }), ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "sub_1" }), ctx)
+    const subRun = tracer.spans.find((s) => s.attributes["session.id"] === "sub_1")!
+    expect(subRun.attributes["session.title"]).toBe("Explore the repo")
+  })
+
+  test("stamps a later title on the open run span", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1" }), ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    handleSessionRenamed(evt("session.renamed", { sessionID: "ses_1", title: "Fix the flaky test" }), ctx)
+    expect(tracer.spans[0]!.attributes["session.title"]).toBe("Fix the flaky test")
+  })
+
+  test("puts a known title on a run span started afterwards", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1" }), ctx)
+    handleSessionRenamed(evt("session.renamed", { sessionID: "ses_1", title: "Fix the flaky test" }), ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    expect(tracer.spans[0]!.attributes["session.title"]).toBe("Fix the flaky test")
+  })
+
+  test("leaves session.title unset for an unnamed session", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1" }), ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    expect("session.title" in tracer.spans[0]!.attributes).toBe(false)
+  })
+
+  test("ignores an empty title and keeps the one it has", () => {
+    const { ctx } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1", title: "Fix the flaky test" }), ctx)
+    handleSessionRenamed(evt("session.renamed", { sessionID: "ses_1", title: "" }), ctx)
+    expect(ctx.tracing.sessionTitles.get("ses_1")).toBe("Fix the flaky test")
+  })
+
+  test("keeps the title for the next execution after finalization", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1" }), ctx)
+    handleSessionRenamed(evt("session.renamed", { sessionID: "ses_1", title: "Fix the flaky test" }), ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    handleExecutionEnded(evt("session.execution.succeeded", { sessionID: "ses_1" }), ctx, { type: "succeeded" })
+    finalizeSession("ses_1", ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    expect(tracer.spans.at(-1)!.attributes["session.title"]).toBe("Fix the flaky test")
+  })
+
+  test("records the title without spans when session traces are disabled", () => {
+    const { ctx, tracer } = makeCtx("proj_test", [], ["session"])
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1" }), ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+    handleSessionRenamed(evt("session.renamed", { sessionID: "ses_1", title: "Fix the flaky test" }), ctx)
+    expect(tracer.spans).toHaveLength(0)
+    expect(ctx.tracing.sessionTitles.get("ses_1")).toBe("Fix the flaky test")
   })
 })
