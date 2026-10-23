@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import { SpanStatusCode } from "@opentelemetry/api"
 import { handleStepEnded, handleStepFailed, handleStepStarted, handleTextEnded } from "../../src/handlers/step.ts"
-import { handleExecutionStarted, handleSessionCreated } from "../../src/handlers/session.ts"
+import { finalizeSession, handleExecutionEnded, handleExecutionStarted, handleSessionCreated } from "../../src/handlers/session.ts"
 import { makeCtx, evt, tokens } from "../helpers.ts"
 
 function seedSession(ctx: ReturnType<typeof makeCtx>["ctx"], sessionID = "ses_1") {
@@ -67,6 +67,55 @@ describe("handleStepEnded", () => {
     handleStepStarted(stepStarted(), ctx)
     handleStepEnded(evt("session.step.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", finish: "stop", cost: 0.1, tokens: tokens() }), ctx)
     expect(counters.message.calls).toHaveLength(1)
+  })
+})
+
+describe("step model fallback", () => {
+  function ended(assistantMessageID = "msg_2") {
+    return evt("session.step.ended", { sessionID: "ses_1", assistantMessageID, finish: "stop", cost: 0, tokens: tokens() })
+  }
+
+  test("uses the session's last model when the step start was missed", () => {
+    const { ctx, logger, counters } = makeCtx()
+    seedSession(ctx)
+    handleStepStarted(stepStarted("ses_1", "msg_1"), ctx)
+    handleStepEnded(ended("msg_1"), ctx)
+    handleStepEnded(ended("msg_2"), ctx)
+    const request = logger.records.at(-1)!
+    expect(request.attributes?.["model"]).toBe("claude-sonnet")
+    expect(request.attributes?.["provider"]).toBe("anthropic")
+    expect(counters.token.calls.at(-1)!.attrs["model"]).toBe("claude-sonnet")
+  })
+
+  test("keeps the model of a step that ends after its execution was swept", () => {
+    const { ctx, logger } = makeCtx()
+    seedSession(ctx)
+    handleStepStarted(stepStarted("ses_1", "msg_1"), ctx)
+    handleExecutionEnded(evt("session.execution.interrupted", { sessionID: "ses_1", reason: "user" }), ctx, { type: "interrupted", reason: "user" })
+    finalizeSession("ses_1", ctx)
+    handleStepEnded(ended("msg_1"), ctx)
+    expect(logger.records.find((record) => record.body === "api_request")?.attributes?.["model"]).toBe("claude-sonnet")
+  })
+
+  test("uses the in-flight model request when the step start was missed", () => {
+    const { ctx, logger } = makeCtx()
+    seedSession(ctx)
+    ctx.tracing.activeLlm.set("ses_1", {
+      agent: "build",
+      modelID: "gpt-5",
+      providerID: "openai",
+      spanContext: { traceId: "0".repeat(32), spanId: "0".repeat(16), traceFlags: 1 },
+    })
+    handleStepFailed(evt("session.step.failed", { sessionID: "ses_1", assistantMessageID: "msg_2", error: { type: "x", message: "y" } }), ctx)
+    expect(logger.records.at(-1)!.attributes?.["model"]).toBe("gpt-5")
+    expect(logger.records.at(-1)!.attributes?.["provider"]).toBe("openai")
+  })
+
+  test("reports unknown when nothing names the model", () => {
+    const { ctx, logger } = makeCtx()
+    seedSession(ctx)
+    handleStepEnded(ended(), ctx)
+    expect(logger.records.at(-1)!.attributes?.["model"]).toBe("unknown")
   })
 })
 

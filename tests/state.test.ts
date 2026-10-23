@@ -54,6 +54,16 @@ describe("multi-location telemetry", () => {
     expect(scoped.commonAttrs["project.id"]).toBe("other-project")
   })
 
+  test("keeps the model of a session it looks up", async () => {
+    const { ctx } = makeCtx()
+    await contextForSession("resumed", ctx, async () => ({
+      projectID: "project",
+      model: { id: "claude-opus", providerID: "anthropic" },
+      time: { created: 500 },
+    }))
+    expect(ctx.tracing.sessionIdentity.get("resumed")?.model).toEqual({ id: "claude-opus", providerID: "anthropic" })
+  })
+
   test("serializes duplicate subscribers across an asynchronous lookup", async () => {
     const { ctx } = makeCtx()
     const order: string[] = []

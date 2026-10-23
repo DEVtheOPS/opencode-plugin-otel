@@ -23,7 +23,7 @@ import {
   SemanticConventions,
   SESSION_ID,
 } from "@arizeai/openinference-semantic-conventions"
-import type { EventOf, HandlerContext, SessionTotals } from "../types.ts"
+import type { EventOf, HandlerContext, SessionTotals, StepMeta } from "../types.ts"
 import { ensureSession } from "./session.ts"
 import { applyModelContext } from "./chat-headers.ts"
 import {
@@ -83,6 +83,13 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
   if (totals && totals.agent !== d.agent) {
     setBoundedMap(ctx.tracing.sessionTotals, d.sessionID, { ...totals, agent: d.agent })
   }
+  const identity = ctx.tracing.sessionIdentity.get(d.sessionID)
+  if (identity) {
+    setBoundedMap(ctx.tracing.sessionIdentity, d.sessionID, {
+      ...identity,
+      model: { id: d.model.id, providerID: d.model.providerID },
+    })
+  }
 
   if (!isTraceEnabled("llm", ctx)) return
   const promptText = ctx.tracing.activePrompts.get(d.sessionID)?.text
@@ -141,6 +148,15 @@ export function handleTextEnded(e: EventOf<"session.text.ended">, ctx: HandlerCo
   setBoundedMap(ctx.tracing.stepOutputs, assistantMessageID, output)
 }
 
+function stepModel(meta: StepMeta | undefined, sessionID: string, ctx: HandlerContext): { modelID: string; providerID: string } {
+  if (meta) return { modelID: meta.modelID, providerID: meta.providerID }
+  const active = ctx.tracing.activeLlm.get(sessionID)
+  if (active) return { modelID: active.modelID, providerID: active.providerID }
+  const model = ctx.tracing.sessionIdentity.get(sessionID)?.model
+  if (model) return { modelID: model.id, providerID: model.providerID }
+  return { modelID: "unknown", providerID: "unknown" }
+}
+
 function countMessage(messageID: string, sessionID: string, modelID: string, providerID: string, agent: string, ctx: HandlerContext): boolean {
   if (ctx.tracing.countedMessages.has(messageID)) return false
   markSeen(ctx.tracing.countedMessages, messageID)
@@ -166,8 +182,7 @@ export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerCo
   const sessionTotals = ctx.tracing.sessionTotals.get(d.sessionID)
   const agent = meta?.agent ?? sessionTotals?.agent ?? "unknown"
   const agentType = meta?.agentType ?? sessionTotals?.agentType ?? "unknown"
-  const modelID = meta?.modelID ?? "unknown"
-  const providerID = meta?.providerID ?? "unknown"
+  const { modelID, providerID } = stepModel(meta, d.sessionID, ctx)
   const durationMs = Math.max(0, e.created - (meta?.startMs ?? e.created))
 
   recordUsageMetrics(d.sessionID, modelID, agent, d.tokens, d.cost, ctx)
@@ -233,8 +248,7 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
   const sessionTotals = ctx.tracing.sessionTotals.get(d.sessionID)
   const agent = meta?.agent ?? sessionTotals?.agent ?? "unknown"
   const agentType = meta?.agentType ?? sessionTotals?.agentType ?? "unknown"
-  const modelID = meta?.modelID ?? "unknown"
-  const providerID = meta?.providerID ?? "unknown"
+  const { modelID, providerID } = stepModel(meta, d.sessionID, ctx)
   const error = errorSummary(d.error)
   const durationMs = Math.max(0, e.created - (meta?.startMs ?? e.created))
 

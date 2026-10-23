@@ -178,7 +178,13 @@ export function getSessionAgentMeta(
 export async function contextForSession(
   sessionID: string,
   ctx: HandlerContext,
-  getSession: (sessionID: string) => Promise<{ projectID: string; agent?: string; parentID?: string; time: { created: number } }>,
+  getSession: (sessionID: string) => Promise<{
+    projectID: string
+    agent?: string
+    parentID?: string
+    model?: { id: string; providerID: string }
+    time: { created: number }
+  }>,
 ): Promise<HandlerContext> {
   let projectID = ctx.tracing.sessionProjects.get(sessionID)
   if (!projectID || !ctx.tracing.sessionIdentity.has(sessionID)) {
@@ -190,6 +196,7 @@ export async function contextForSession(
         agent: session.agent ?? "unknown",
         agentType: session.parentID ? "subagent" : "primary",
         ...(session.parentID ? { parentID: session.parentID } : {}),
+        ...(session.model ? { model: { id: session.model.id, providerID: session.model.providerID } } : {}),
         startMs: session.time.created,
       })
     } catch {
