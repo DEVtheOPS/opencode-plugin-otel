@@ -6,6 +6,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [2.0.1](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v2.0.0...v2.0.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **tool:** record locally executed tools in OpenCode V2 ([#134](https://github.com/DEVtheOPS/opencode-plugin-otel/issues/134)) ([129feb9](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/129feb9e884dd3c115e6ffa2b1ebcc124127e8f4))
+
+## [2.0.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.5.1...v2.0.0) (2026-09-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* migrate to OpenCode V2 ([#132](https://github.com/DEVtheOPS/opencode-plugin-otel/issues/132))
+
+### Features
+
+* migrate to OpenCode V2 ([#132](https://github.com/DEVtheOPS/opencode-plugin-otel/issues/132)) ([dae25f0](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/dae25f09e54dbbc04570567379342e0949073f37))
+
+## [1.5.1](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.5.0...v1.5.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **deps:** move TypeScript to dev dependencies ([#118](https://github.com/DEVtheOPS/opencode-plugin-otel/issues/118)) ([4fcf511](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/4fcf511b19553e9889216e23c90184feb218b86e))
+
+## [1.5.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.4.0...v1.5.0) (2026-08-03)
+
+
+### Features
+
+* add prompt logging release metadata ([#114](https://github.com/DEVtheOPS/opencode-plugin-otel/issues/114)) ([63970d8](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/63970d868acea8615dfb97a497d6b19db2941ccd))
+
+
+### Bug Fixes
+
+* **ci:** skip checks for release pull requests ([#116](https://github.com/DEVtheOPS/opencode-plugin-otel/issues/116)) ([2b2d852](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/2b2d852aa4c56af36a63df31be2b0a564fa9eb9f))
+
 ## [1.4.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v1.3.1...v1.4.0) (2026-07-23)
 
 

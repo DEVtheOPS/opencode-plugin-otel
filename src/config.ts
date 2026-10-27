@@ -13,6 +13,9 @@ const TRACE_DISABLE_ALL_VALUES = new Set(["all", "*", "true", "1"])
 export type PluginConfig = {
   enabled: boolean
   logsEnabled: boolean
+  capturePromptInLogs: boolean
+  captureModelContext: boolean
+  logLevel: string | undefined
   endpoint: string
   protocol: "grpc" | "http/protobuf" | "http/json"
   metricsInterval: number
@@ -50,8 +53,8 @@ export function parseAttributePairs(raw: string | undefined): Record<string, str
 }
 
 /**
- * Options accepted via the opencode plugin tuple form
- * (`["opencode-plugin-otel", { ... }]`). Every field is optional; a provided
+ * Options accepted via the OpenCode V2 plugin object form
+ * (`{ "package": "opencode-plugin-otel", "options": { ... } }`). Every field is optional; a provided
  * value takes precedence over the matching `OPENCODE_*` environment variable,
  * which in turn wins over the built-in default. Field names mirror the resolved
  * {@link PluginConfig}.
@@ -59,6 +62,9 @@ export function parseAttributePairs(raw: string | undefined): Record<string, str
 export type OtelPluginOptions = {
   enabled?: boolean
   logsEnabled?: boolean
+  capturePromptInLogs?: boolean
+  captureModelContext?: boolean
+  logLevel?: string
   endpoint?: string
   protocol?: "grpc" | "http/protobuf" | "http/json"
   metricsInterval?: number
@@ -162,10 +168,8 @@ function expandDisabledTraces(values: string[]): Set<string> {
  * variables. For every field a provided option wins over the environment
  * variable, which in turn wins over the built-in default.
  *
- * Copies the resolved headers, resource attributes, and metrics temporality into
- * `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_RESOURCE_ATTRIBUTES`, and
- * `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE` so the OTel SDK picks them
- * up automatically when initialised.
+ * Copies resource attributes and metrics temporality into the corresponding
+ * OTel environment variables. OTLP headers are passed directly to exporters.
  */
 export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
   const resolvedOptions = typeof options === "object" && options !== null ? options : {}
@@ -196,7 +200,6 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
 
   if (metricsTemporality) process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = metricsTemporality
 
-  if (otlpHeaders) process.env["OTEL_EXPORTER_OTLP_HEADERS"] = otlpHeaders
   if (resourceAttributes) process.env["OTEL_RESOURCE_ATTRIBUTES"] = resourceAttributes
 
   const optionMetrics = pickStringList(resolvedOptions.disabledMetrics)
@@ -240,6 +243,9 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
   return {
     enabled: pickBoolean(resolvedOptions.enabled) ?? hasNonEmptyEnv("OPENCODE_ENABLE_TELEMETRY"),
     logsEnabled: pickBoolean(resolvedOptions.logsEnabled) ?? !hasNonEmptyEnv("OPENCODE_DISABLE_LOGS"),
+    capturePromptInLogs: pickBoolean(resolvedOptions.capturePromptInLogs) ?? hasNonEmptyEnv("OPENCODE_CAPTURE_PROMPT_IN_LOGS"),
+    captureModelContext: pickBoolean(resolvedOptions.captureModelContext) ?? hasNonEmptyEnv("OPENCODE_CAPTURE_MODEL_CONTEXT"),
+    logLevel: pickString(resolvedOptions.logLevel),
     endpoint: pickString(resolvedOptions.endpoint) ?? process.env["OPENCODE_OTLP_ENDPOINT"] ?? "http://localhost:4317",
     protocol,
     metricsInterval: pickPositiveInt(resolvedOptions.metricsInterval) ?? parseEnvInt("OPENCODE_OTLP_METRICS_INTERVAL", 60000),
