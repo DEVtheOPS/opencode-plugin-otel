@@ -1,0 +1,47 @@
+src/types.ts
+  s_250e9c40831446::t_5b4fc0bb3d52ba 185
+tests/config.test.ts
+  s_250e9c40831446::t_49823bfae9e25a 189-196
+  s_250e9c40831446::t_499788f6ce0bb6 79
+AGENTS.md
+  s_250e9c40831446::t_6c477ffd0e5517 67
+src/handlers/step.ts
+  s_250e9c40831446::t_8cc1e56f02a97c 189
+  s_250e9c40831446::t_56fad584b3bb84 225-226
+  s_250e9c40831446::t_a60906ec3da389 260
+  s_250e9c40831446::t_e2a56344e229fd 306-307
+  s_250e9c40831446::t_5871efc07c398e 38
+  s_250e9c40831446::t_d8bd722eab4448 48-51
+README.md
+  s_250e9c40831446::t_aec19e9939ad0a 73
+  s_250e9c40831446::t_6e2a169f2361a0 192
+  s_250e9c40831446::t_ceba23fab05dfc 148
+tests/helpers.ts
+  s_250e9c40831446::t_a7875101479497 203
+  s_250e9c40831446::t_e0bbdd7ab8d4d9 248
+tests/handlers/step.test.ts
+  s_250e9c40831446::t_b3c3e702027b9b 62-92
+  s_250e9c40831446::t_74d025148d4909 124-136
+src/config.ts
+  s_250e9c40831446::t_6b4693b1bfcec8 65
+  s_250e9c40831446::t_e4f2160c600650 204
+  s_250e9c40831446::t_8e4b40341d79be 18
+src/plugin.ts
+  s_250e9c40831446::t_efcfd452001dfd 106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "4ae86e61b2c86f38ae14caf2f6bf5e7c8d2d31b7",
+  "prompts": {},
+  "sessions": {
+    "s_250e9c40831446": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e3ed451e8ffea4AjN2Y1W1kEBP",
+        "model": "unknown"
+      },
+      "human_author": "Marc Seiler <digitalfiz@proton.me>"
+    }
+  }
+}
