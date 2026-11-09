@@ -59,6 +59,37 @@ describe("handleStepEnded", () => {
     expect(llm.attributes["llm.output_messages"]).toBe('[{"role":"assistant","content":"hello\\nworld"}]')
   })
 
+  test("reports reasoning separately from output by default", () => {
+    const { ctx, tracer, counters, logger } = makeCtx()
+    seedSession(ctx)
+    handleStepStarted(stepStarted(), ctx)
+    handleStepEnded(evt("session.step.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", finish: "stop", cost: 0, tokens: tokens(10, 5, 2) }), ctx)
+    const byType = Object.fromEntries(counters.token.calls.map((c) => [c.attrs["type"], c.value]))
+    expect(byType["output"]).toBe(5)
+    expect(byType["reasoning"]).toBe(2)
+    const attrs = logger.records.at(-1)!.attributes!
+    expect(attrs["output_tokens"]).toBe(5)
+    expect(attrs["reasoning_tokens"]).toBe(2)
+    expect(tracer.spans.find((s) => s.name === "opencode.llm")!.attributes["llm.token_count.completion"]).toBe(5)
+  })
+
+  test("folds reasoning into output when combineReasoningTokens is enabled", () => {
+    const { ctx, tracer, counters, logger } = makeCtx("proj_test", [], [], true, {}, true)
+    seedSession(ctx)
+    handleStepStarted(stepStarted(), ctx)
+    handleStepEnded(evt("session.step.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", finish: "stop", cost: 0, tokens: tokens(10, 5, 2, 3, 1) }), ctx)
+    const tokenTypes = counters.token.calls.map((c) => c.attrs["type"])
+    expect(tokenTypes).toEqual(["input", "output", "cacheRead", "cacheCreation"])
+    expect(counters.token.calls.find((c) => c.attrs["type"] === "output")!.value).toBe(7)
+    const attrs = logger.records.at(-1)!.attributes!
+    expect(attrs["output_tokens"]).toBe(7)
+    expect(attrs).not.toHaveProperty("reasoning_tokens")
+    const llm = tracer.spans.find((s) => s.name === "opencode.llm")!
+    expect(llm.attributes["llm.token_count.completion"]).toBe(7)
+    expect(llm.attributes["llm.token_count.completion_details.reasoning"]).toBe(2)
+    expect(llm.attributes["llm.token_count.total"]).toBe(21)
+  })
+
   test("counts a message once across multiple steps", () => {
     const { ctx, counters } = makeCtx()
     seedSession(ctx)
@@ -88,6 +119,19 @@ describe("handleStepFailed", () => {
     expect(logger.records.at(-1)!.attributes?.["error"]).toBe("ProviderError: boom")
     expect(counters.message.calls).toHaveLength(1)
     expect(counters.modelUsage.calls).toHaveLength(1)
+  })
+
+  test("folds reasoning into output for failed steps when combineReasoningTokens is enabled", () => {
+    const { ctx, tracer, counters } = makeCtx("proj_test", [], [], true, {}, true)
+    seedSession(ctx)
+    handleStepStarted(stepStarted(), ctx)
+    handleStepFailed(
+      evt("session.step.failed", { sessionID: "ses_1", assistantMessageID: "msg_1", error: { type: "x", message: "y" }, tokens: tokens(10, 5, 2) }),
+      ctx,
+    )
+    expect(counters.token.calls.some((c) => c.attrs["type"] === "reasoning")).toBe(false)
+    expect(counters.token.calls.find((c) => c.attrs["type"] === "output")!.value).toBe(7)
+    expect(tracer.spans.find((s) => s.name === "opencode.llm")!.attributes["llm.token_count.completion"]).toBe(7)
   })
 
   test("records a failed step cost even when token usage is absent", () => {
