@@ -200,6 +200,7 @@ export function makeCtx(
   disabledTraces: string[] = [],
   logsEnabled = true,
   extraCommonAttrs: Record<string, string> = {},
+  combineReasoningTokens = false,
 ): MockContext {
   const session = makeCounter()
   const token = makeCounter()
@@ -244,6 +245,7 @@ export function makeCtx(
     commonAttrs: { "project.id": projectID, ...extraCommonAttrs },
     disabledMetrics: new Set(disabledMetrics),
     disabledTraces: new Set(disabledTraces),
+    combineReasoningTokens,
     tracer: tracer as unknown as Tracer,
     tracePrefix: "opencode.",
     rootContext: () => ROOT_CONTEXT,

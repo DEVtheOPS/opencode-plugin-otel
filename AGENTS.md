@@ -64,6 +64,7 @@ src/
 - **All env vars are `OPENCODE_` prefixed** — `OPENCODE_ENABLE_TELEMETRY`, `OPENCODE_OTLP_ENDPOINT`, `OPENCODE_OTLP_METRICS_INTERVAL`, `OPENCODE_OTLP_LOGS_INTERVAL`, `OPENCODE_METRIC_PREFIX`, `OPENCODE_CAPTURE_PROMPT_IN_LOGS`, `OPENCODE_OTLP_HEADERS`, `OPENCODE_RESOURCE_ATTRIBUTES`, `OPENCODE_SPAN_ATTRIBUTES`. Never use bare `OTEL_*` names for plugin config. Headers are passed directly to exporters; `loadConfig` copies `OPENCODE_RESOURCE_ATTRIBUTES` → `OTEL_RESOURCE_ATTRIBUTES` before the SDK initializes.
 - **`OPENCODE_ENABLE_TELEMETRY`** — all OTel instrumentation is gated on this env var (or the `enabled` plugin option). The plugin always loads regardless.
 - **`OPENCODE_METRIC_PREFIX`** — defaults to `opencode.`; set to `claude_code.` for Claude Code dashboard compatibility.
+- **Reasoning tokens** — OpenCode V2 reports `output` with reasoning subtracted (`visibleOutputTokens`), whereas Claude Code's `output` includes thinking. `OPENCODE_COMBINE_REASONING_TOKENS` folds reasoning back into `output` (metric, `api_request` log, span completion count) and suppresses the separate `reasoning` metric/log field so sums never double-count. Session totals and `llm.token_count.total` are unaffected.
 - **Plugin options** — read from `ctx.options` during `setup`. Precedence is option → `OPENCODE_*` env → default. Keep option keys 1:1 with `PluginConfig` field names.
 
 ## Commit message format

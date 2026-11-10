@@ -15,6 +15,7 @@ export type PluginConfig = {
   logsEnabled: boolean
   capturePromptInLogs: boolean
   captureModelContext: boolean
+  combineReasoningTokens: boolean
   logLevel: string | undefined
   endpoint: string
   protocol: "grpc" | "http/protobuf" | "http/json"
@@ -61,6 +62,7 @@ export type OtelPluginOptions = {
   logsEnabled?: boolean
   capturePromptInLogs?: boolean
   captureModelContext?: boolean
+  combineReasoningTokens?: boolean
   logLevel?: string
   endpoint?: string
   protocol?: "grpc" | "http/protobuf" | "http/json"
@@ -199,6 +201,7 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
     logsEnabled: pickBoolean(resolvedOptions.logsEnabled) ?? !hasNonEmptyEnv("OPENCODE_DISABLE_LOGS"),
     capturePromptInLogs: pickBoolean(resolvedOptions.capturePromptInLogs) ?? hasNonEmptyEnv("OPENCODE_CAPTURE_PROMPT_IN_LOGS"),
     captureModelContext: pickBoolean(resolvedOptions.captureModelContext) ?? hasNonEmptyEnv("OPENCODE_CAPTURE_MODEL_CONTEXT"),
+    combineReasoningTokens: pickBoolean(resolvedOptions.combineReasoningTokens) ?? hasNonEmptyEnv("OPENCODE_COMBINE_REASONING_TOKENS"),
     logLevel: pickString(resolvedOptions.logLevel),
     endpoint: pickString(resolvedOptions.endpoint) ?? process.env["OPENCODE_OTLP_ENDPOINT"] ?? "http://localhost:4317",
     protocol,

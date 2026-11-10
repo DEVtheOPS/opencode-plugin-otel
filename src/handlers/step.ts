@@ -35,6 +35,7 @@ import {
   markSeen,
   resolveRunContext,
   setBoundedMap,
+  type TokenInfo,
 } from "../util.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
@@ -42,6 +43,10 @@ const LLM_FINISH_REASON = "llm.finish_reason"
 
 function billedTokens(tokens: { input: number; output: number; reasoning: number } | undefined): number {
   return (tokens?.input ?? 0) + (tokens?.output ?? 0) + (tokens?.reasoning ?? 0)
+}
+
+function completionTokens(tokens: TokenInfo, ctx: HandlerContext): number {
+  return ctx.combineReasoningTokens ? tokens.output + tokens.reasoning : tokens.output
 }
 
 function allTokens(tokens: { input: number; output: number; reasoning: number; cache: { read: number; write: number } } | undefined): number {
@@ -181,7 +186,7 @@ export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerCo
       [AGENT_NAME]: agent,
       "agent.type": agentType,
       [LLM_TOKEN_COUNT_PROMPT]: d.tokens.input,
-      [LLM_TOKEN_COUNT_COMPLETION]: d.tokens.output,
+      [LLM_TOKEN_COUNT_COMPLETION]: completionTokens(d.tokens, ctx),
       [LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING]: d.tokens.reasoning,
       [LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ]: d.tokens.cache.read,
       [LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE]: d.tokens.cache.write,
@@ -217,8 +222,8 @@ export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerCo
       cost_usd: d.cost,
       duration_ms: durationMs,
       input_tokens: d.tokens.input,
-      output_tokens: d.tokens.output,
-      reasoning_tokens: d.tokens.reasoning,
+      output_tokens: completionTokens(d.tokens, ctx),
+      ...(ctx.combineReasoningTokens ? {} : { reasoning_tokens: d.tokens.reasoning }),
       cache_read_tokens: d.tokens.cache.read,
       cache_creation_tokens: d.tokens.cache.write,
       ...ctx.commonAttrs,
@@ -252,7 +257,7 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
       duration_ms: durationMs,
       ...(d.tokens ? {
         [LLM_TOKEN_COUNT_PROMPT]: d.tokens.input,
-        [LLM_TOKEN_COUNT_COMPLETION]: d.tokens.output,
+        [LLM_TOKEN_COUNT_COMPLETION]: completionTokens(d.tokens, ctx),
         [LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING]: d.tokens.reasoning,
         [LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ]: d.tokens.cache.read,
         [LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE]: d.tokens.cache.write,
@@ -298,8 +303,8 @@ function recordUsageMetrics(
   if (tokens && isMetricEnabled("token.usage", ctx)) {
     const { tokenCounter } = ctx.instruments
     tokenCounter.add(tokens.input, { ...base, type: "input" })
-    tokenCounter.add(tokens.output, { ...base, type: "output" })
-    tokenCounter.add(tokens.reasoning, { ...base, type: "reasoning" })
+    tokenCounter.add(completionTokens(tokens, ctx), { ...base, type: "output" })
+    if (!ctx.combineReasoningTokens) tokenCounter.add(tokens.reasoning, { ...base, type: "reasoning" })
     tokenCounter.add(tokens.cache.read, { ...base, type: "cacheRead" })
     tokenCounter.add(tokens.cache.write, { ...base, type: "cacheCreation" })
   }

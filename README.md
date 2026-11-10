@@ -70,7 +70,7 @@ the parent run span; a background child may outlive its already-ended dispatch t
 | Metric | Type | Description |
 |--------|------|-------------|
 | `opencode.session.count` | Counter | Incremented on `session.created`, or lazily when a pre-existing session is first observed |
-| `opencode.token.usage` | Counter | Per token type: `input`, `output`, `reasoning`, `cacheRead`, `cacheCreation` (per `session.step.ended`) |
+| `opencode.token.usage` | Counter | Per token type: `input`, `output`, `reasoning`, `cacheRead`, `cacheCreation` (per `session.step.ended`). With `OPENCODE_COMBINE_REASONING_TOKENS`, `reasoning` is folded into `output` and not emitted separately |
 | `opencode.cost.usage` | Counter | USD cost per completed LLM step |
 | `opencode.commit.count` | Counter | `git commit` commands observed in successful, executed shell-tool calls; Git's resulting repository state is not verified |
 | `opencode.tool.duration` | Histogram | Tool execution time in milliseconds |
@@ -145,6 +145,7 @@ The environment variables (set them in your shell profile — `~/.zshrc`, `~/.ba
 | `OPENCODE_DISABLE_LOGS` | *(unset)* | Set to any non-empty value to suppress all OTLP log events while leaving metrics and traces unchanged |
 | `OPENCODE_CAPTURE_PROMPT_IN_LOGS` | *(unset)* | Set to any non-empty value to include the full prompt text in the `prompt` attribute of `user_prompt` log events. **Log events only** — trace spans carry an observed prompt in `input.value` regardless of this flag (disable span-level capture separately via `OPENCODE_DISABLE_TRACES`). **Off by default — prompts may contain secrets or PII; enable only for trusted collectors.** |
 | `OPENCODE_CAPTURE_MODEL_CONTEXT` | *(unset)* | Set to any non-empty value to attach a bounded text-only preview of the primary model-visible context to LLM spans. Off by default; can include system instructions, earlier messages, and tool text. |
+| `OPENCODE_COMBINE_REASONING_TOKENS` | *(unset)* | Set to any non-empty value to report reasoning tokens as part of `output` instead of a separate `reasoning` type. OpenCode V2 excludes reasoning from `output`, while Claude Code includes it, so enable this for Claude Code dashboard and cost parity. Applies to the `token.usage` metric, `api_request` `output_tokens` (with `reasoning_tokens` omitted), and the LLM span `llm.token_count.completion`; `llm.token_count.completion_details.reasoning` still carries the reasoning subset. |
 | `OPENCODE_DISABLE_TRACES` | *(unset)* | Comma-separated list of trace types to disable (`session`, `llm`, `tool`). Use `all`, `*`, `true`, or `1` to disable every trace type |
 | `OPENCODE_OTLP_HEADERS` | *(unset)* | Comma-separated `key=value` headers added to all OTLP exports. **Keep out of version control — may contain sensitive auth tokens.** |
 | `OPENCODE_OTLP_HEADERS_HELPER` | *(unset)* | Executable script/binary that returns dynamic OTLP headers as JSON after an auth failure. Helper headers override `OPENCODE_OTLP_HEADERS`. |
@@ -188,6 +189,7 @@ Option keys mirror the resolved config and map to the environment variables:
 | `logsEnabled` | `OPENCODE_DISABLE_LOGS` (inverted) |
 | `capturePromptInLogs` | `OPENCODE_CAPTURE_PROMPT_IN_LOGS` |
 | `captureModelContext` | `OPENCODE_CAPTURE_MODEL_CONTEXT` |
+| `combineReasoningTokens` | `OPENCODE_COMBINE_REASONING_TOKENS` |
 | `logLevel` | *(none — option only)*: `debug`, `info`, `warn`, `error` |
 | `endpoint` | `OPENCODE_OTLP_ENDPOINT` |
 | `protocol` | `OPENCODE_OTLP_PROTOCOL` |

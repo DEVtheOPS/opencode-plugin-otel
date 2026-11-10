@@ -76,6 +76,7 @@ describe("loadConfig", () => {
     "OPENCODE_DISABLE_LOGS",
     "OPENCODE_CAPTURE_PROMPT_IN_LOGS",
     "OPENCODE_CAPTURE_MODEL_CONTEXT",
+    "OPENCODE_COMBINE_REASONING_TOKENS",
     "OPENCODE_DISABLE_TRACES",
     "OPENCODE_TRACE_PROPAGATION_PROVIDERS",
     "OTEL_EXPORTER_OTLP_HEADERS",
@@ -183,6 +184,14 @@ describe("loadConfig", () => {
     process.env["OPENCODE_CAPTURE_MODEL_CONTEXT"] = "1"
     expect(loadConfig().captureModelContext).toBe(true)
     expect(loadConfig({ captureModelContext: false }).captureModelContext).toBe(false)
+  })
+
+  test("combines reasoning tokens only when explicitly enabled", () => {
+    expect(loadConfig().combineReasoningTokens).toBe(false)
+    expect(loadConfig({ combineReasoningTokens: true }).combineReasoningTokens).toBe(true)
+    process.env["OPENCODE_COMBINE_REASONING_TOKENS"] = "1"
+    expect(loadConfig().combineReasoningTokens).toBe(true)
+    expect(loadConfig({ combineReasoningTokens: false }).combineReasoningTokens).toBe(false)
   })
 
   test("does not set OTEL_EXPORTER_OTLP_HEADERS when OPENCODE_OTLP_HEADERS is unset", () => {

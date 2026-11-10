@@ -103,6 +103,7 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
     commonAttrs: parseAttributePairs(config.spanAttributes),
     disabledMetrics: config.disabledMetrics,
     disabledTraces: config.disabledTraces,
+    combineReasoningTokens: config.combineReasoningTokens,
     tracer: shared.tracer,
     tracePrefix: config.metricPrefix,
     rootContext: remoteContext ? () => remoteContext : () => ROOT_CONTEXT,
