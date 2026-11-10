@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [2.1.0](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v2.0.1...v2.1.0) (2026-11-10)
+
+
+### Features
+
+* Add option to fold reasoning tokens into output ([#142](https://github.com/DEVtheOPS/opencode-plugin-otel/issues/142)) ([cb97f31](https://github.com/DEVtheOPS/opencode-plugin-otel/commit/cb97f3146c80b68c15646311b90efcf877c9ab83))
+
 ## [2.0.1](https://github.com/DEVtheOPS/opencode-plugin-otel/compare/v2.0.0...v2.0.1) (2026-10-06)
 
 
