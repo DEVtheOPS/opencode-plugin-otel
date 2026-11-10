@@ -141,6 +141,14 @@ export function resolveStepContext(sessionID: string, assistantMessageID: string
   return spanContext ? trace.setSpanContext(parent, spanContext) : parent
 }
 
+export function resolveToolContext(callID: string, sessionID: string, assistantMessageID: string, ctx: HandlerContext): Context {
+  const parent = resolveStepContext(sessionID, assistantMessageID, ctx)
+  const span = ctx.tracing.toolSpans.get(callID)
+  if (span) return trace.setSpan(parent, span)
+  const spanContext = ctx.tracing.toolSpanContexts.get(callID)
+  return spanContext ? trace.setSpanContext(parent, spanContext) : parent
+}
+
 /** Resolves a child run under its correlated dispatch tool, falling back to the parent run. */
 export function resolveSubagentTraceContext(sessionID: string, parentID: string, agent: string, ctx: HandlerContext): Context {
   const exact = ctx.tracing.subagentParents.get(sessionID)

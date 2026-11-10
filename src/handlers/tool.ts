@@ -22,6 +22,7 @@ import {
   isMetricEnabled,
   isTraceEnabled,
   resolveStepContext,
+  resolveToolContext,
   setBoundedMap,
 } from "../util.ts"
 
@@ -173,6 +174,7 @@ function finishTool(
   const durationMs = Math.max(0, endMs - start)
   const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
   const sizeBytes = output ? Buffer.byteLength(output, "utf8") : 0
+  const logContext = resolveToolContext(callID, sessionID, meta?.assistantMessageID ?? "", ctx)
 
   if (success && observedExecution && meta.command && SHELL_TOOL_RE.test(tool) && GIT_COMMIT_RE.test(meta.command)) {
     if (isMetricEnabled("commit.count", ctx)) {
@@ -184,6 +186,7 @@ function finishTool(
       timestamp: endMs,
       observedTimestamp: Date.now(),
       body: "commit",
+      context: logContext,
       attributes: {
         "event.name": "commit",
         "session.id": sessionID,
@@ -226,6 +229,7 @@ function finishTool(
     timestamp: start,
     observedTimestamp: Date.now(),
     body: "tool_result",
+    context: logContext,
     attributes: {
       "event.name": "tool_result",
       "session.id": sessionID,

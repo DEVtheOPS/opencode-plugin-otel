@@ -24,7 +24,10 @@ test("exports real OpenCode session telemetry over OTLP/JSON", async () => {
   expect(Number(sessions["asDouble"] ?? sessions["asInt"])).toBe(1)
   expect(attributes(sessions)["session.id"]).toBe(result["sessionID"])
   const logs = signalRecords(received["logs"]!, "Logs")
-  expect(logs.some(log => attributes(log)["event.name"] === "api_request")).toBe(true)
+  const apiLog = logs.find(log => attributes(log)["event.name"] === "api_request")!
+  expect(apiLog).toBeDefined()
+  expect(apiLog["traceId"]).toBe(llm["traceId"])
+  expect(apiLog["spanId"]).toBe(llm["spanId"])
   expect(logs.some(log => attributes(log)["event.name"] === "session.idle")).toBe(true)
 }, 40_000)
 
@@ -64,6 +67,10 @@ for (const disabled of [false, true]) {
         expect(parent["name"]).toBe("opencode.llm")
         expect(tool!["traceId"]).toBe(parent["traceId"])
         expect(attributes(tool!)["output.value"]).toContain("integration-fixture-contents")
+        const log = signalRecords(scenario.received["logs"]!, "Logs")
+          .find(record => attributes(record)["event.name"] === "tool_result")!
+        expect(log["traceId"]).toBe(tool!["traceId"])
+        expect(log["spanId"]).toBe(tool!["spanId"])
       })
     }
 

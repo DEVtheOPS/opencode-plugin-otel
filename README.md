@@ -100,6 +100,12 @@ the parent run span; a background child may outlive its already-ended dispatch t
 
 ## Installation
 
+Log events associated with an observed LLM step, tool call, or failed execution carry that span's native OTel
+trace and span IDs. Events without a matching span can remain uncorrelated. Disabling a span type uses its
+available parent context; disabling logs still suppresses all log export. Trace IDs are not metric attributes.
+Prompt admission logs use the current execution's context only when steering an active execution. Queued prompts
+remain uncorrelated because their consuming execution has not started yet.
+
 Add the plugin to your opencode config at `~/.config/opencode/opencode.json`:
 
 ```json

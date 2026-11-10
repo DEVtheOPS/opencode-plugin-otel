@@ -1,6 +1,6 @@
 import { SeverityNumber } from "@opentelemetry/api-logs"
 import type { EventOf, HandlerContext } from "../types.ts"
-import { agentAttrs, getSessionAgentMeta, setBoundedMap } from "../util.ts"
+import { agentAttrs, getSessionAgentMeta, resolveRunContext, setBoundedMap } from "../util.ts"
 
 /** Stores an answered permission prompt for correlation when the reply arrives. */
 export function handlePermissionAsked(e: EventOf<"permission.asked">, ctx: HandlerContext) {
@@ -31,6 +31,7 @@ export function handlePermissionReplied(e: EventOf<"permission.replied">, ctx: H
     timestamp: e.created,
     observedTimestamp: Date.now(),
     body: "tool_decision",
+    context: resolveRunContext(d.sessionID, ctx),
     attributes: {
       "event.name": "tool_decision",
       "session.id": d.sessionID,
