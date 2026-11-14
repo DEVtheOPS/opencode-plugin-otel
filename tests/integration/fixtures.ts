@@ -85,6 +85,8 @@ export async function runScenario(scenario: "text" | "read", disabledTraces = ""
       OPENCODE_OTLP_ENDPOINT: String(receiver.url),
       OPENCODE_OTLP_PROTOCOL: "http/json",
       OPENCODE_DISABLE_TRACES: disabledTraces,
+      // The scenarios assert captured span content, which is opt-in.
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "true",
     })
     const git = Bun.spawnSync(["git", "init", "--quiet", directory], { env })
     if (git.exitCode !== 0) throw new Error(git.stderr.toString())
