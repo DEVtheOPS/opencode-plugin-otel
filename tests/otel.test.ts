@@ -9,7 +9,27 @@ import { OTLPMetricExporter as OTLPProtoMetricExporter } from "@opentelemetry/ex
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc"
 import { OTLPTraceExporter as OTLPHttpTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { OTLPTraceExporter as OTLPProtoTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto"
-import { buildResource, forceFlushOtel, setupOtel, type OtelProviders } from "../src/otel.ts"
+import { buildResource, forceFlushOtel, proxyBypassed, setupOtel, type OtelProviders } from "../src/otel.ts"
+
+describe("proxyBypassed", () => {
+  test("always bypasses loopback endpoints", () => {
+    expect(proxyBypassed("http://localhost:4318")).toBe(true)
+    expect(proxyBypassed("http://127.0.0.1:4318")).toBe(true)
+    expect(proxyBypassed("http://[::1]:4318/v1/traces")).toBe(true)
+  })
+
+  test("does not bypass remote hosts without NO_PROXY", () => {
+    expect(proxyBypassed("https://collector.example.com")).toBe(false)
+  })
+
+  test("honors NO_PROXY suffixes and the wildcard", () => {
+    expect(proxyBypassed("https://collector.internal.example", "internal.example")).toBe(true)
+    expect(proxyBypassed("https://collector.internal.example", ".internal.example")).toBe(true)
+    expect(proxyBypassed("https://collector.example.com", "internal.example")).toBe(false)
+    expect(proxyBypassed("https://collector.example.com", "*")).toBe(true)
+    expect(proxyBypassed("https://collector.example.com", "other.example, collector.example.com")).toBe(true)
+  })
+})
 
 let providers: OtelProviders | undefined
 
@@ -130,11 +150,20 @@ describe("setupOtel", () => {
     expect(exporters.trace).toBeInstanceOf(OTLPHttpTraceExporter)
   })
 
+  test("accepts an OTLP forward proxy URL for HTTP exporters", async () => {
+    providers = await setupOtel("http://collector:4318", "http/json", 60000, 5000, "1.2.3", undefined, undefined, "http://proxy.example:8080")
+    const exporters = exportersOf(providers)
+
+    expect(exporters.metric).toBeInstanceOf(OTLPHttpMetricExporter)
+    expect(exporters.log).toBeInstanceOf(OTLPHttpLogExporter)
+    expect(exporters.trace).toBeInstanceOf(OTLPHttpTraceExporter)
+  })
+
   test("uses the accepted metrics temporality rather than a rejected setup's environment", async () => {
     const original = process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"]
     try {
       process.env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = "cumulative"
-      providers = await setupOtel("http://collector:4318", "http/json", 60000, 5000, "2.0.0", undefined, undefined, "", "delta")
+      providers = await setupOtel("http://collector:4318", "http/json", 60000, 5000, "2.0.0", undefined, undefined, undefined, "", "delta")
       const exporter = exportersOf(providers).metric as OTLPHttpMetricExporter
       expect(exporter.selectAggregationTemporality(InstrumentType.COUNTER)).toBe(AggregationTemporality.DELTA)
     } finally {

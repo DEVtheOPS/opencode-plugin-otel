@@ -2,7 +2,7 @@ import { ROOT_CONTEXT } from "@opentelemetry/api"
 import pkg from "../package.json" with { type: "json" }
 import { loadConfig, parseAttributePairs, resolveHelperPath, resolveLogLevel, type OtelPluginOptions } from "./config.ts"
 import { probeEndpoint } from "./probe.ts"
-import { forceFlushOtel } from "./otel.ts"
+import { forceFlushOtel, proxyBypassed } from "./otel.ts"
 import { remoteParentContext } from "./trace-context.ts"
 import { acquireSharedOtel, acquireTracingState, createFlushScheduler, flushSharedOtel, releaseSharedOtel } from "./state.ts"
 import { LEVELS, type HandlerContext, type Level, type OpenCodeContext, type OpenCodeEvent } from "./types.ts"
@@ -66,7 +66,8 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
     headersHelperSet: !!config.otlpHeadersHelper,
   })
 
-  const probe = await probeEndpoint(config.endpoint)
+  const probeTarget = config.otlpProxyUrl && !proxyBypassed(config.endpoint) ? config.otlpProxyUrl : config.endpoint
+  const probe = await probeEndpoint(probeTarget)
   if (probe.ok) {
     await log("info", "OTLP endpoint reachable", { endpoint: config.endpoint, ms: probe.ms })
   } else {
