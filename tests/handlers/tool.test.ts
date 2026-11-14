@@ -42,17 +42,22 @@ describe("handleToolInputStarted", () => {
 
 describe("handleToolCalled", () => {
   test("attaches parameters and detects a local git commit", () => {
-    const { ctx, counters, logger, tracer } = makeCtx()
-    seed(ctx)
-    handleToolInputStarted(inputStarted("call_1", "shell"), ctx)
-    handleToolCalled(called("call_1", { command: "git commit -m 'x'" }, local), ctx)
-    expect(counters.commit.calls).toHaveLength(0)
-    handleToolSuccess(succeeded("call_1", "commit made", local), ctx)
-    expect(counters.commit.calls).toHaveLength(1)
-    expect(logger.records.some((record) => record.body === "commit")).toBe(true)
-    const span = tracer.spans.find((s) => s.name === "opencode.tool.shell")!
-    expect(span.attributes["input.value"]).toContain("git commit")
-    expect(span.attributes["tool.provider_executed"]).toBe(false)
+    process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "true"
+    try {
+      const { ctx, counters, logger, tracer } = makeCtx()
+      seed(ctx)
+      handleToolInputStarted(inputStarted("call_1", "shell"), ctx)
+      handleToolCalled(called("call_1", { command: "git commit -m 'x'" }, local), ctx)
+      expect(counters.commit.calls).toHaveLength(0)
+      handleToolSuccess(succeeded("call_1", "commit made", local), ctx)
+      expect(counters.commit.calls).toHaveLength(1)
+      expect(logger.records.some((record) => record.body === "commit")).toBe(true)
+      const span = tracer.spans.find((s) => s.name === "opencode.tool.shell")!
+      expect(span.attributes["input.value"]).toContain("git commit")
+      expect(span.attributes["tool.provider_executed"]).toBe(false)
+    } finally {
+      delete process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+    }
   })
 
   test("ignores non-commit shell commands", () => {
@@ -76,22 +81,27 @@ describe("handleToolCalled", () => {
 
 describe("handleToolSuccess", () => {
   test("records a locally executed tool", () => {
-    const { ctx, histograms, logger, tracer } = makeCtx()
-    seed(ctx)
-    handleToolInputStarted(inputStarted("call_1", "read", "ses_1", 1000), ctx)
-    handleToolCalled(called("call_1", {}, local, 1000), ctx)
-    handleToolSuccess(succeeded("call_1", "file body", local, 1250), ctx)
-    expect(histograms.tool.calls).toHaveLength(1)
-    expect(histograms.tool.calls[0]!.value).toBe(250)
-    expect(histograms.tool.calls[0]!.attrs["success"]).toBe(true)
-    const record = logger.records.at(-1)!
-    expect(record.body).toBe("tool_result")
-    expect(record.attributes?.["duration_ms"]).toBe(250)
-    const span = tracer.spans.find((s) => s.name === "opencode.tool.read")!
-    expect(span.startTime).toBe(1000)
-    expect(span.endTime).toBe(1250)
-    expect(span.status.code).toBe(SpanStatusCode.OK)
-    expect(span.attributes["output.value"]).toBe("file body")
+    process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "true"
+    try {
+      const { ctx, histograms, logger, tracer } = makeCtx()
+      seed(ctx)
+      handleToolInputStarted(inputStarted("call_1", "read", "ses_1", 1000), ctx)
+      handleToolCalled(called("call_1", {}, local, 1000), ctx)
+      handleToolSuccess(succeeded("call_1", "file body", local, 1250), ctx)
+      expect(histograms.tool.calls).toHaveLength(1)
+      expect(histograms.tool.calls[0]!.value).toBe(250)
+      expect(histograms.tool.calls[0]!.attrs["success"]).toBe(true)
+      const record = logger.records.at(-1)!
+      expect(record.body).toBe("tool_result")
+      expect(record.attributes?.["duration_ms"]).toBe(250)
+      const span = tracer.spans.find((s) => s.name === "opencode.tool.read")!
+      expect(span.startTime).toBe(1000)
+      expect(span.endTime).toBe(1250)
+      expect(span.status.code).toBe(SpanStatusCode.OK)
+      expect(span.attributes["output.value"]).toBe("file body")
+    } finally {
+      delete process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+    }
   })
 
   test("records a provider-executed tool", () => {

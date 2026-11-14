@@ -183,6 +183,7 @@ export type HandlerContext = {
   disabledMetrics: Set<string>
   disabledTraces: Set<string>
   combineReasoningTokens: boolean
+  captureContent: boolean
   tracer: Tracer
   tracePrefix: string
   rootContext: () => Context

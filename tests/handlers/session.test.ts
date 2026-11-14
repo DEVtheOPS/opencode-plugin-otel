@@ -62,16 +62,21 @@ describe("handlePromptEnqueued", () => {
 
 describe("handleExecutionStarted", () => {
   test("starts a run span and attaches the pending prompt", () => {
-    const { ctx, tracer } = makeCtx()
-    handleSessionCreated(evt("session.created", { sessionID: "ses_1" }), ctx)
-    ctx.tracing.pendingPrompts.set("ses_1", [{ text: "hello", startMs: 1 }])
-    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }, 2000), ctx)
-    const span = tracer.spans[0]!
-    expect(span.name).toBe("opencode.session")
-    expect(span.startTime).toBe(2000)
-    expect(span.attributes["input.value"]).toBe("hello")
-    expect(ctx.tracing.runSpans.has("ses_1")).toBe(true)
-    expect(ctx.tracing.activePrompts.get("ses_1")!.text).toBe("hello")
+    process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "true"
+    try {
+      const { ctx, tracer } = makeCtx()
+      handleSessionCreated(evt("session.created", { sessionID: "ses_1" }), ctx)
+      ctx.tracing.pendingPrompts.set("ses_1", [{ text: "hello", startMs: 1 }])
+      handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }, 2000), ctx)
+      const span = tracer.spans[0]!
+      expect(span.name).toBe("opencode.session")
+      expect(span.startTime).toBe(2000)
+      expect(span.attributes["input.value"]).toBe("hello")
+      expect(ctx.tracing.runSpans.has("ses_1")).toBe(true)
+      expect(ctx.tracing.activePrompts.get("ses_1")!.text).toBe("hello")
+    } finally {
+      delete process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+    }
   })
 
   test("nests subagent runs under the parent run span", () => {
@@ -133,40 +138,50 @@ describe("handleExecutionStarted", () => {
   })
 
   test("retains a prompt queued during the current execution for the next run", () => {
-    const { ctx, tracer } = makeCtx()
-    handleSessionCreated(evt("session.created", { sessionID: "ses_1", projectID: "p" }), ctx)
-    const prompt = (text: string) => evt("session.inbox.enqueued", {
-      sessionID: "ses_1", inboxID: text,
-      item: { type: "user", payload: { text }, delivery: "queue" },
-    })
-    handlePromptEnqueued(prompt("first"), ctx, false)
-    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
-    handlePromptEnqueued(prompt("second"), ctx, false)
-    handleExecutionEnded(evt("session.execution.succeeded", { sessionID: "ses_1" }), ctx, { type: "succeeded" })
-    finalizeSession("ses_1", ctx)
-    expect(ctx.tracing.pendingPrompts.get("ses_1")?.[0]?.text).toBe("second")
-    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
-    expect(tracer.spans.at(-1)?.attributes["input.value"]).toBe("second")
+    process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "true"
+    try {
+      const { ctx, tracer } = makeCtx()
+      handleSessionCreated(evt("session.created", { sessionID: "ses_1", projectID: "p" }), ctx)
+      const prompt = (text: string) => evt("session.inbox.enqueued", {
+        sessionID: "ses_1", inboxID: text,
+        item: { type: "user", payload: { text }, delivery: "queue" },
+      })
+      handlePromptEnqueued(prompt("first"), ctx, false)
+      handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+      handlePromptEnqueued(prompt("second"), ctx, false)
+      handleExecutionEnded(evt("session.execution.succeeded", { sessionID: "ses_1" }), ctx, { type: "succeeded" })
+      finalizeSession("ses_1", ctx)
+      expect(ctx.tracing.pendingPrompts.get("ses_1")?.[0]?.text).toBe("second")
+      handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+      expect(tracer.spans.at(-1)?.attributes["input.value"]).toBe("second")
+    } finally {
+      delete process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+    }
   })
 
   test("applies a steering prompt to the current run, not the next run", () => {
-    const { ctx, tracer } = makeCtx()
-    handleSessionCreated(evt("session.created", { sessionID: "ses_1", projectID: "p" }), ctx)
-    handlePromptEnqueued(evt("session.inbox.enqueued", {
-      sessionID: "ses_1", inboxID: "first", item: { type: "user", payload: { text: "first" }, delivery: "steer" },
-    }), ctx, false)
-    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
-    handlePromptEnqueued(evt("session.inbox.enqueued", {
-      sessionID: "ses_1", inboxID: "steering", item: { type: "user", payload: { text: "steering" }, delivery: "steer" },
-    }), ctx, false)
-    handlePromptEnqueued(evt("session.inbox.enqueued", {
-      sessionID: "ses_1", inboxID: "second", item: { type: "user", payload: { text: "second" }, delivery: "queue" },
-    }), ctx, false)
-    expect(ctx.tracing.activePrompts.get("ses_1")?.text).toBe("first\nsteering")
-    handleExecutionEnded(evt("session.execution.succeeded", { sessionID: "ses_1" }), ctx, { type: "succeeded" })
-    finalizeSession("ses_1", ctx)
-    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
-    expect(tracer.spans.at(-1)?.attributes["input.value"]).toBe("second")
+    process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "true"
+    try {
+      const { ctx, tracer } = makeCtx()
+      handleSessionCreated(evt("session.created", { sessionID: "ses_1", projectID: "p" }), ctx)
+      handlePromptEnqueued(evt("session.inbox.enqueued", {
+        sessionID: "ses_1", inboxID: "first", item: { type: "user", payload: { text: "first" }, delivery: "steer" },
+      }), ctx, false)
+      handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+      handlePromptEnqueued(evt("session.inbox.enqueued", {
+        sessionID: "ses_1", inboxID: "steering", item: { type: "user", payload: { text: "steering" }, delivery: "steer" },
+      }), ctx, false)
+      handlePromptEnqueued(evt("session.inbox.enqueued", {
+        sessionID: "ses_1", inboxID: "second", item: { type: "user", payload: { text: "second" }, delivery: "queue" },
+      }), ctx, false)
+      expect(ctx.tracing.activePrompts.get("ses_1")?.text).toBe("first\nsteering")
+      handleExecutionEnded(evt("session.execution.succeeded", { sessionID: "ses_1" }), ctx, { type: "succeeded" })
+      finalizeSession("ses_1", ctx)
+      handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
+      expect(tracer.spans.at(-1)?.attributes["input.value"]).toBe("second")
+    } finally {
+      delete process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+    }
   })
 })
 

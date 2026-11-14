@@ -203,7 +203,7 @@ export function handleExecutionStarted(e: EventOf<"session.execution.started">, 
         [AGENT_NAME]: totals?.agent ?? "unknown",
         "agent.type": totals?.agentType ?? "primary",
         "session.is_subagent": isSubagent,
-        ...(promptText
+        ...(promptText && ctx.captureContent
           ? {
               [INPUT_VALUE]: promptText,
               [INPUT_MIME_TYPE]: MimeType.TEXT,
