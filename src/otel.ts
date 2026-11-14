@@ -43,6 +43,33 @@ export function buildResource(version: string, resourceAttributes = process.env[
   return resourceFromAttributes(attrs)
 }
 
+/**
+ * Returns true when the endpoint's host must bypass the forward proxy:
+ * loopback addresses always do, and hosts matching the standard `NO_PROXY`
+ * list (comma-separated suffixes, `*` matches everything) do as well.
+ */
+export function proxyBypassed(
+  endpoint: string,
+  noProxy: string | undefined = process.env["NO_PROXY"] ?? process.env["no_proxy"],
+): boolean {
+  let host: string
+  try {
+    host = new URL(endpoint).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return true
+  if (!noProxy) return false
+  for (const entry of noProxy.split(",")) {
+    const pattern = entry.trim().toLowerCase()
+    if (!pattern) continue
+    if (pattern === "*") return true
+    const normalized = pattern.startsWith(".") ? pattern.slice(1) : pattern
+    if (host === normalized || host.endsWith("." + normalized)) return true
+  }
+  return false
+}
+
 /** Handles returned by `setupOtel`, used for graceful shutdown. */
 export type OtelProviders = {
   meterProvider: MeterProvider
@@ -114,11 +141,13 @@ export async function setupOtel(
   const temporalityPreference = metricTemporalityPreference(metricsTemporality)
   // Optional forward proxy for OTLP export: the agent is created lazily inside
   // the factory so `https` is not loaded before any HTTP instrumentation.
-  const agentOptions = otlpProxyUrl
+  // Loopback endpoints always bypass the proxy, as does anything matching NO_PROXY.
+  const effectiveProxyUrl = otlpProxyUrl && !proxyBypassed(endpoint) ? otlpProxyUrl : undefined
+  const agentOptions = effectiveProxyUrl
     ? {
         httpAgentOptions: ((_protocol: string) => {
           const { HttpsProxyAgent } = require("https-proxy-agent") as typeof import("https-proxy-agent")
-          return new HttpsProxyAgent(otlpProxyUrl)
+          return new HttpsProxyAgent(effectiveProxyUrl)
         }) as import("@opentelemetry/otlp-exporter-base").OTLPExporterNodeConfigBase["httpAgentOptions"],
       }
     : {}
