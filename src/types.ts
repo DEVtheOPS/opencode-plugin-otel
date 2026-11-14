@@ -81,6 +81,7 @@ export type SessionIdentity = {
   agent: string
   agentType: SessionAgentType
   parentID?: string
+  model?: { id: string; providerID: string }
   startMs: number
   tokens?: number
   cost?: number
