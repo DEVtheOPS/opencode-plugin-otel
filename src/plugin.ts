@@ -66,7 +66,7 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
     headersHelperSet: !!config.otlpHeadersHelper,
   })
 
-  const probe = await probeEndpoint(config.endpoint)
+  const probe = await probeEndpoint(config.otlpProxyUrl ?? config.endpoint)
   if (probe.ok) {
     await log("info", "OTLP endpoint reachable", { endpoint: config.endpoint, ms: probe.ms })
   } else {

@@ -24,6 +24,7 @@ export type PluginConfig = {
   metricPrefix: string
   otlpHeaders: string | undefined
   otlpHeadersHelper: string | undefined
+  otlpProxyUrl: string | undefined
   resourceAttributes: string | undefined
   spanAttributes: string | undefined
   traceparent: string | undefined
@@ -71,6 +72,7 @@ export type OtelPluginOptions = {
   metricPrefix?: string
   otlpHeaders?: string
   otlpHeadersHelper?: string
+  otlpProxyUrl?: string
   resourceAttributes?: string
   spanAttributes?: string
   traceparent?: string
@@ -155,6 +157,9 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
   const resolvedOptions = typeof options === "object" && options !== null ? options : {}
   const otlpHeaders = pickString(resolvedOptions.otlpHeaders) ?? process.env["OPENCODE_OTLP_HEADERS"]
   const otlpHeadersHelper = pickString(resolvedOptions.otlpHeadersHelper) ?? process.env["OPENCODE_OTLP_HEADERS_HELPER"]
+  const otlpProxyUrl = pickString(resolvedOptions.otlpProxyUrl)
+    ?? (hasNonEmptyEnv("OPENCODE_OTLP_PROXY_URL") ? process.env["OPENCODE_OTLP_PROXY_URL"] : undefined)
+    ?? (hasNonEmptyEnv("OTEL_EXPORTER_OTLP_PROXY_URL") ? process.env["OTEL_EXPORTER_OTLP_PROXY_URL"] : undefined)
   const resourceAttributes = pickString(resolvedOptions.resourceAttributes) ?? process.env["OPENCODE_RESOURCE_ATTRIBUTES"]
   const spanAttributes = pickString(resolvedOptions.spanAttributes) ?? process.env["OPENCODE_SPAN_ATTRIBUTES"]
   const traceparent = pickString(resolvedOptions.traceparent) ?? process.env["OPENCODE_TRACEPARENT"]
@@ -210,6 +215,7 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
     metricPrefix: pickString(resolvedOptions.metricPrefix) ?? process.env["OPENCODE_METRIC_PREFIX"] ?? "opencode.",
     otlpHeaders,
     otlpHeadersHelper,
+    otlpProxyUrl,
     resourceAttributes,
     spanAttributes,
     traceparent,
