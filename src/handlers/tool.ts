@@ -81,9 +81,7 @@ export function handleToolCalled(e: EventOf<"session.tool.called">, ctx: Handler
   const { agentName, agentType } = getSessionAgentMeta(d.sessionID, ctx)
   const inputJson = safeJson(d.input)
   ctx.tracing.toolSpans.get(d.id)?.setAttributes({
-    [TOOL_PARAMETERS]: inputJson,
-    [INPUT_VALUE]: inputJson,
-    [INPUT_MIME_TYPE]: MimeType.JSON,
+    ...(ctx.captureContent ? { [TOOL_PARAMETERS]: inputJson, [INPUT_VALUE]: inputJson, [INPUT_MIME_TYPE]: MimeType.JSON } : {}),
     [AGENT_NAME]: agentName,
     "agent.type": agentType,
     "tool.provider_executed": isProviderExecuted(d),
@@ -205,7 +203,7 @@ function finishTool(
   const span = ctx.tracing.toolSpans.get(callID)
   if (span) {
     span.setAttributes({ [AGENT_NAME]: agentName, "agent.type": agentType, "tool.success": success })
-    if (output) {
+    if (output && ctx.captureContent) {
       span.setAttributes({ [OUTPUT_VALUE]: output, [OUTPUT_MIME_TYPE]: MimeType.TEXT })
     }
     if (success) {
