@@ -129,7 +129,13 @@ export function resolveRunContext(sessionID: string, ctx: HandlerContext): Conte
   const span = ctx.tracing.runSpans.get(sessionID)
   if (span) return trace.setSpan(base, span)
   const spanContext = ctx.tracing.runSpanContexts.get(sessionID)
-  return spanContext ? trace.setSpanContext(base, spanContext) : base
+  if (spanContext) return trace.setSpanContext(base, spanContext)
+  // Fall back to the parent session's run span so spans started before this
+  // session's own run span exists (e.g. a subagent's first model request)
+  // join the parent turn's trace instead of forking a separate one.
+  const parentID = ctx.tracing.sessionIdentity.get(sessionID)?.parentID
+  if (parentID && parentID !== sessionID) return resolveRunContext(parentID, ctx)
+  return base
 }
 
 /** Resolves the trace context for a step span, falling back to its run context. */

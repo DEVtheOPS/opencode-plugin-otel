@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import { SpanStatusCode } from "@opentelemetry/api"
 import {
+  ensureRunSpan,
   finalizeSession,
   handleExecutionEnded,
   handleExecutionStarted,
@@ -182,6 +183,37 @@ describe("handleExecutionStarted", () => {
     } finally {
       delete process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
     }
+  })
+})
+
+describe("ensureRunSpan", () => {
+  test("creates the run span early, anchored to the enqueued prompt time", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1" }), ctx)
+    ctx.tracing.pendingPrompts.set("ses_1", [{ text: "hello", startMs: 1000 }])
+    ensureRunSpan("ses_1", 5000, ctx)
+    const span = tracer.spans[0]!
+    expect(span.name).toBe("opencode.session")
+    expect(span.startTime).toBe(1000)
+  })
+
+  test("a late execution.started enriches the early run span instead of duplicating it", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1", agent: "build" }), ctx)
+    ctx.tracing.pendingPrompts.set("ses_1", [{ text: "hello", startMs: 1000 }])
+    ensureRunSpan("ses_1", 5000, ctx)
+    handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }, 2000), ctx)
+    const runs = tracer.spans.filter((s) => s.name === "opencode.session")
+    expect(runs).toHaveLength(1)
+    expect(runs[0]!.startTime).toBe(1000)
+    expect(runs[0]!.attributes["agent.name"]).toBe("build")
+  })
+
+  test("skips subagent sessions so execution.started can parent them under the dispatch tool", () => {
+    const { ctx, tracer } = makeCtx()
+    handleSessionCreated(evt("session.created", { sessionID: "sub_1", parentID: "ses_1" }), ctx)
+    ensureRunSpan("sub_1", 5000, ctx)
+    expect(tracer.spans).toHaveLength(0)
   })
 })
 

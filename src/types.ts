@@ -115,6 +115,10 @@ export type LlmRequestContext = {
   modelID: string
   providerID: string
   spanContext: SpanContext
+  /** Live span reference, used to detect stale entries from an already-ended step. */
+  span?: { isRecording(): boolean }
+  /** True when the entry was set by step.started (a finished-or-finishing step). */
+  fromStep?: boolean
 }
 
 /** Bounded model-visible text snapshot awaiting its matching primary request. */

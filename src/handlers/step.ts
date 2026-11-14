@@ -24,7 +24,7 @@ import {
   SESSION_ID,
 } from "@arizeai/openinference-semantic-conventions"
 import type { EventOf, HandlerContext, SessionTotals } from "../types.ts"
-import { ensureSession } from "./session.ts"
+import { ensureRunSpan, ensureSession } from "./session.ts"
 import { applyModelContext } from "./chat-headers.ts"
 import {
   agentAttrs,
@@ -90,6 +90,10 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
   }
 
   if (!isTraceEnabled("llm", ctx)) return
+  // Make sure the run (session) span exists before starting the LLM span:
+  // opencode may deliver step.started before execution.started, and without
+  // this the first LLM span would fork its own trace as a root span.
+  ensureRunSpan(d.sessionID, d.started ?? e.created, ctx)
   const promptText = ctx.tracing.activePrompts.get(d.sessionID)?.text
   const attributes = {
     [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.LLM,
@@ -136,6 +140,8 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
     modelID: d.model.id,
     providerID: d.model.providerID,
     spanContext: span.spanContext(),
+    span,
+    fromStep: true,
   })
 }
 

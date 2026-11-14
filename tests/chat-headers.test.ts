@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import { captureModelContext, handleModelRequest } from "../src/handlers/chat-headers.ts"
 import { handleStepStarted } from "../src/handlers/step.ts"
+import { handleSessionCreated } from "../src/handlers/session.ts"
 import { makeCtx, evt } from "./helpers.ts"
 
 const SPAN_CONTEXT = {
@@ -36,13 +37,20 @@ describe("handleModelRequest", () => {
     expect(headers["traceparent"]).toBeDefined()
   })
 
-  test("does not propagate a primary step into an auxiliary model request", async () => {
-    const { ctx } = makeCtx()
+  test("anchors an auxiliary model request to the run span, not the primary step", async () => {
+    const { ctx, tracer } = makeCtx()
     ctx.tracePropagationProviders.add("*")
     ctx.tracing.activeLlm.set("ses_1", { agent: "build", modelID: "m", providerID: "vllm", spanContext: SPAN_CONTEXT })
     const headers: Record<string, string> = {}
     await handleModelRequest({ sessionID: "ses_1", agent: "build", model: { providerID: "vllm", id: "m" }, kind: "title", headers }, ctx)
-    expect(headers["traceparent"]).toBeUndefined()
+    // Without an explicit context, the HTTP layer stamps its own native
+    // traceparent and the request forks a separate trace. Auxiliary requests
+    // join the turn's run span instead, but must not adopt the primary
+    // step's span context.
+    const run = tracer.spans.find((s) => s.name === "opencode.session")
+    expect(run).toBeDefined()
+    expect(headers["traceparent"]).toBeDefined()
+    expect(headers["traceparent"]).not.toContain(SPAN_CONTEXT.spanId)
   })
 
   test("injects the matching context into a WebSocket handshake", async () => {
@@ -52,6 +60,22 @@ describe("handleModelRequest", () => {
     const handshake = { sessionID: "ses_1", agent: "build", model: { providerID: "openai", id: "m" }, kind: "primary", url: "wss://example.invalid/v1", headers: {} as Record<string, string> }
     await handleModelRequest(handshake, ctx)
     expect(handshake.headers["traceparent"]).toBe("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+  })
+
+  test("does not reuse a previous step's span context for a new request", async () => {
+    const { ctx, tracer } = makeCtx()
+    ctx.tracePropagationProviders.add("*")
+    handleSessionCreated(evt("session.created", { sessionID: "ses_1" }), ctx)
+    const previous = tracer.startSpan("opencode.llm", {})
+    previous.end()
+    ctx.tracing.activeLlm.set("ses_1", { agent: "build", modelID: "m", providerID: "vllm", spanContext: previous.spanContext(), span: previous, fromStep: true })
+    const headers: Record<string, string> = {}
+    await handleModelRequest({ sessionID: "ses_1", agent: "build", model: { providerID: "vllm", id: "m" }, kind: "primary", headers }, ctx)
+    expect(headers["traceparent"]).toBeDefined()
+    const injectedSpanId = headers["traceparent"]!.split("-")[2]!
+    expect(injectedSpanId).not.toBe(previous.spanContext().spanId)
+    const llms = tracer.spans.filter((span) => span.name === "opencode.llm")
+    expect(llms).toHaveLength(2)
   })
 
   test("waits for pending event processing and adopts a provisional span", async () => {

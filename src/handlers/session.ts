@@ -188,10 +188,31 @@ export function handleExecutionStarted(e: EventOf<"session.execution.started">, 
   if (!isTraceEnabled("session", ctx)) return
 
   const isSubagent = totals?.agentType === "subagent"
+  const promptText = pendingPrompt?.text ?? ""
+  const promptAttrs = promptText && ctx.captureContent
+    ? {
+        [INPUT_VALUE]: promptText,
+        [INPUT_MIME_TYPE]: MimeType.TEXT,
+        [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
+      }
+    : {}
+
+  const existing = ctx.tracing.runSpans.get(sessionID)
+  if (existing) {
+    // The run span was eagerly created by the model.request hook before this
+    // event was consumed; enrich it instead of starting a duplicate.
+    existing.setAttributes({
+      [AGENT_NAME]: totals?.agent ?? "unknown",
+      "agent.type": totals?.agentType ?? "primary",
+      ...promptAttrs,
+    })
+    setBoundedMap(ctx.tracing.runSpanContexts, sessionID, existing.spanContext())
+    return
+  }
+
   const parentCtx = isSubagent && totals?.parentID
     ? resolveSubagentTraceContext(sessionID, totals.parentID, totals.agent, ctx)
     : ctx.rootContext()
-  const promptText = pendingPrompt?.text ?? ""
 
   const span = ctx.tracer.startSpan(
     `${ctx.tracePrefix}session`,
@@ -203,17 +224,48 @@ export function handleExecutionStarted(e: EventOf<"session.execution.started">, 
         [AGENT_NAME]: totals?.agent ?? "unknown",
         "agent.type": totals?.agentType ?? "primary",
         "session.is_subagent": isSubagent,
-        ...(promptText && ctx.captureContent
-          ? {
-              [INPUT_VALUE]: promptText,
-              [INPUT_MIME_TYPE]: MimeType.TEXT,
-              [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
-            }
-          : {}),
+        ...promptAttrs,
         ...ctx.commonAttrs,
       },
     },
     parentCtx,
+  )
+  setBoundedMap(ctx.tracing.runSpans, sessionID, span)
+  setBoundedMap(ctx.tracing.runSpanContexts, sessionID, span.spanContext())
+}
+
+/**
+ * Creates the per-turn run (session) span if absent, so spans started from
+ * synchronous hooks (`model.request`) attach to the turn's trace instead of
+ * forking a separate one when `session.execution.started` has not been
+ * consumed yet. Skipped for subagents, whose parenting is resolved from the
+ * dispatch tool span when `session.execution.started` arrives.
+ */
+export function ensureRunSpan(sessionID: string, at: number, ctx: HandlerContext): void {
+  if (ctx.tracing.runSpans.has(sessionID)) return
+  if (!isTraceEnabled("session", ctx)) return
+  const identity = ctx.tracing.sessionIdentity.get(sessionID)
+  if (identity?.agentType === "subagent") return
+  // Anchor the run span to the enqueued prompt (turn start) when available so
+  // performance views keep the pre-request lead time; the hook timestamp is
+  // only a fallback for prompts we never observed.
+  const startMs = ctx.tracing.activePrompts.get(sessionID)?.startMs
+    ?? ctx.tracing.pendingPrompts.get(sessionID)?.[0]?.startMs
+    ?? at
+  const span = ctx.tracer.startSpan(
+    `${ctx.tracePrefix}session`,
+    {
+      startTime: startMs,
+      attributes: {
+        [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.AGENT,
+        [SESSION_ID]: sessionID,
+        [AGENT_NAME]: identity?.agent ?? "unknown",
+        "agent.type": identity?.agentType ?? "primary",
+        "session.is_subagent": false,
+        ...ctx.commonAttrs,
+      },
+    },
+    ctx.rootContext(),
   )
   setBoundedMap(ctx.tracing.runSpans, sessionID, span)
   setBoundedMap(ctx.tracing.runSpanContexts, sessionID, span.spanContext())
@@ -356,6 +408,15 @@ export function finalizeSession(sessionID: string, ctx: HandlerContext) {
   ctx.tracing.modelContexts.delete(sessionID)
   ctx.tracing.activePrompts.delete(sessionID)
   ctx.tracing.activeExecutions.delete(sessionID)
+
+  // End a run span that outlived its execution (e.g. eagerly created by a
+  // model.request hook for a request outside any execution).
+  const danglingRun = ctx.tracing.runSpans.get(sessionID)
+  if (danglingRun) {
+    danglingRun.end()
+    ctx.tracing.runSpans.delete(sessionID)
+    ctx.tracing.runSpanContexts.delete(sessionID)
+  }
 
   const attrs = { ...ctx.commonAttrs, "session.id": sessionID }
   const durationMs = Date.now() - totals.startMs
