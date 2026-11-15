@@ -52,7 +52,9 @@ export function proxyBypassed(
   try {
     const url = new URL(endpoint)
     hostname = url.hostname.toLowerCase()
-    hostWithPort = url.port ? `${hostname}:${url.port}` : hostname
+    const defaultPort = url.protocol === "https:" ? "443" : url.protocol === "http:" ? "80" : ""
+    const port = url.port || defaultPort
+    hostWithPort = port ? `${hostname}:${port}` : hostname
   } catch {
     return false
   }
