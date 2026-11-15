@@ -58,7 +58,7 @@ export function proxyBypassed(
   } catch {
     return false
   }
-  if (hostname === "localhost" || hostname === "::1" || hostname === "[::1]" || /^127\./.test(hostname)) return true
+  if (hostname === "localhost" || hostname === "::1" || hostname === "[::1]" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true
   if (!noProxy) return false
   for (const entry of noProxy.split(",")) {
     const pattern = entry.trim().toLowerCase()
