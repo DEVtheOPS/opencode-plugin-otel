@@ -248,7 +248,8 @@ function contentText(content: readonly ToolContent[] | undefined): string {
 function safeJson(value: unknown): string {
   try {
     const text = JSON.stringify(value) ?? ""
-    return text.length <= 64_000 ? text : text.slice(0, 64_000)
+    if (text.length <= 64_000) return text
+    return JSON.stringify(text.slice(0, 64_000))
   } catch {
     return ""
   }

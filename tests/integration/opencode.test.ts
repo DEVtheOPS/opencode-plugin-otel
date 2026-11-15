@@ -2,7 +2,6 @@ import { beforeAll, describe, expect, test } from "bun:test"
 import { runScenario } from "./fixtures.ts"
 import { attributes, metricPoints, objects, signalRecords } from "./otlp.ts"
 
-// These scenarios assert captured span content, which is opt-in.
 process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "true"
 
 test("exports real OpenCode session telemetry over OTLP/JSON", async () => {
