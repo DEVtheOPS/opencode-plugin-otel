@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test"
 import { SpanStatusCode } from "@opentelemetry/api"
+import { handleExecutionEnded } from "../../src/handlers/session.ts"
 import { handlePermissionAsked, handlePermissionReplied, sweepPermissionSpans } from "../../src/handlers/permission.ts"
 import { handleStepStarted } from "../../src/handlers/step.ts"
 import { makeCtx, evt } from "../helpers.ts"
@@ -52,5 +53,16 @@ describe("permission spans", () => {
     expect(span.ended).toBe(true)
     expect(span.attributes["permission.decision"]).toBe("cancelled")
     expect(span.status.code).toBe(SpanStatusCode.ERROR)
+  })
+
+  test("execution-end sweep ends unanswered permission spans before pending entries drop", () => {
+    const { ctx, tracer } = makeCtx()
+    handlePermissionAsked(asked(), ctx)
+    // The real path: handleExecutionEnded -> sweepExecution deletes pendingPermissions,
+    // so the span sweep must run before that or it can no longer match the session.
+    handleExecutionEnded(evt("session.execution.succeeded", { sessionID: "ses_1" }), ctx, { type: "succeeded" })
+    const span = tracer.spans.find((s) => s.name === "opencode.permission")!
+    expect(span.ended).toBe(true)
+    expect(span.attributes["permission.decision"]).toBe("cancelled")
   })
 })

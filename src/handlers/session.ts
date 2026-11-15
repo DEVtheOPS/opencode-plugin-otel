@@ -424,8 +424,10 @@ function sweepExecution(sessionID: string, ctx: HandlerContext) {
     ctx.tracing.stepMeta.delete(messageID)
     ctx.tracing.stepOutputs.delete(messageID)
   }
+  // Sweep permission spans before dropping their pending entries: the sweep
+  // matches spans to sessions through pendingPermissions.
+  sweepPermissionSpans(sessionID, ctx)
   for (const [id, perm] of ctx.tracing.pendingPermissions) {
     if (perm.sessionID === sessionID) ctx.tracing.pendingPermissions.delete(id)
   }
-  sweepPermissionSpans(sessionID, ctx)
 }
