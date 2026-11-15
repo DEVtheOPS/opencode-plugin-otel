@@ -43,11 +43,6 @@ export function buildResource(version: string, resourceAttributes = process.env[
   return resourceFromAttributes(attrs)
 }
 
-/**
- * Returns true when the endpoint's host must bypass the forward proxy:
- * loopback addresses always do, and hosts matching the standard `NO_PROXY`
- * list (comma-separated suffixes, `*` matches everything) do as well.
- */
 export function proxyBypassed(
   endpoint: string,
   noProxy: string | undefined = process.env["NO_PROXY"] ?? process.env["no_proxy"],
@@ -139,13 +134,14 @@ export async function setupOtel(
   const staticHeaders = parseOtlpHeaders(otlpHeaders)
   const dynamicHeaders = new DynamicHeaders(staticHeaders, otlpHeadersHelper)
   const temporalityPreference = metricTemporalityPreference(metricsTemporality)
-  // Optional forward proxy for OTLP export: the agent is created lazily inside
-  // the factory so `https` is not loaded before any HTTP instrumentation.
-  // Loopback endpoints always bypass the proxy, as does anything matching NO_PROXY.
   const effectiveProxyUrl = otlpProxyUrl && !proxyBypassed(endpoint) ? otlpProxyUrl : undefined
   const agentOptions = effectiveProxyUrl
     ? {
-        httpAgentOptions: ((_protocol: string) => {
+        httpAgentOptions: ((protocol: string) => {
+          if (protocol === "http:") {
+            const { HttpProxyAgent } = require("http-proxy-agent") as typeof import("http-proxy-agent")
+            return new HttpProxyAgent(effectiveProxyUrl)
+          }
           const { HttpsProxyAgent } = require("https-proxy-agent") as typeof import("https-proxy-agent")
           return new HttpsProxyAgent(effectiveProxyUrl)
         }) as import("@opentelemetry/otlp-exporter-base").OTLPExporterNodeConfigBase["httpAgentOptions"],

@@ -68,7 +68,6 @@ describe("loadConfig", () => {
     "OPENCODE_OTLP_HEADERS",
     "OPENCODE_OTLP_HEADERS_HELPER",
     "OPENCODE_OTLP_PROXY_URL",
-    "OTEL_EXPORTER_OTLP_PROXY_URL",
     "OPENCODE_RESOURCE_ATTRIBUTES",
     "OPENCODE_SPAN_ATTRIBUTES",
     "OPENCODE_TRACEPARENT",
@@ -106,8 +105,8 @@ describe("loadConfig", () => {
     expect(loadConfig().otlpProxyUrl).toBe("http://proxy.example:8080")
   })
 
-  test("otlpProxyUrl falls back to OTEL_EXPORTER_OTLP_PROXY_URL", () => {
-    process.env["OTEL_EXPORTER_OTLP_PROXY_URL"] = "http://proxy.example:8080"
+  test("otlpProxyUrl from OPENCODE_OTLP_PROXY_URL", () => {
+    process.env["OPENCODE_OTLP_PROXY_URL"] = "http://proxy.example:8080"
     expect(loadConfig().otlpProxyUrl).toBe("http://proxy.example:8080")
   })
 

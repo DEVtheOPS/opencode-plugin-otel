@@ -159,7 +159,6 @@ export function loadConfig(options: OtelPluginOptions = {}): PluginConfig {
   const otlpHeadersHelper = pickString(resolvedOptions.otlpHeadersHelper) ?? process.env["OPENCODE_OTLP_HEADERS_HELPER"]
   const otlpProxyUrl = pickString(resolvedOptions.otlpProxyUrl)
     ?? (hasNonEmptyEnv("OPENCODE_OTLP_PROXY_URL") ? process.env["OPENCODE_OTLP_PROXY_URL"] : undefined)
-    ?? (hasNonEmptyEnv("OTEL_EXPORTER_OTLP_PROXY_URL") ? process.env["OTEL_EXPORTER_OTLP_PROXY_URL"] : undefined)
   const resourceAttributes = pickString(resolvedOptions.resourceAttributes) ?? process.env["OPENCODE_RESOURCE_ATTRIBUTES"]
   const spanAttributes = pickString(resolvedOptions.spanAttributes) ?? process.env["OPENCODE_SPAN_ATTRIBUTES"]
   const traceparent = pickString(resolvedOptions.traceparent) ?? process.env["OPENCODE_TRACEPARENT"]
