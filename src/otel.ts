@@ -47,20 +47,24 @@ export function proxyBypassed(
   endpoint: string,
   noProxy: string | undefined = process.env["NO_PROXY"] ?? process.env["no_proxy"],
 ): boolean {
-  let host: string
+  let hostname: string
+  let hostWithPort: string
   try {
-    host = new URL(endpoint).hostname.toLowerCase()
+    const url = new URL(endpoint)
+    hostname = url.hostname.toLowerCase()
+    hostWithPort = url.port ? `${hostname}:${url.port}` : hostname
   } catch {
     return false
   }
-  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return true
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]") return true
   if (!noProxy) return false
   for (const entry of noProxy.split(",")) {
     const pattern = entry.trim().toLowerCase()
     if (!pattern) continue
     if (pattern === "*") return true
     const normalized = pattern.startsWith(".") ? pattern.slice(1) : pattern
-    if (host === normalized || host.endsWith("." + normalized)) return true
+    if (hostWithPort === normalized || hostWithPort.endsWith("." + normalized)) return true
+    if (hostname === normalized || hostname.endsWith("." + normalized)) return true
   }
   return false
 }
