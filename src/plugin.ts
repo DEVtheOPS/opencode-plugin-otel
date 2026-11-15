@@ -66,7 +66,9 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
     headersHelperSet: !!config.otlpHeadersHelper,
   })
 
-  const probeTarget = config.otlpProxyUrl && !proxyBypassed(config.endpoint) ? config.otlpProxyUrl : config.endpoint
+  const probeTarget = config.otlpProxyUrl && config.protocol !== "grpc" && !proxyBypassed(config.endpoint)
+    ? config.otlpProxyUrl
+    : config.endpoint
   const probe = await probeEndpoint(probeTarget)
   if (probe.ok) {
     await log("info", "OTLP endpoint reachable", { endpoint: config.endpoint, ms: probe.ms })
