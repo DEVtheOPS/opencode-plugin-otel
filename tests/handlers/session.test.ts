@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test"
+﻿import { describe, test, expect } from "bun:test"
 import { SpanStatusCode } from "@opentelemetry/api"
 import {
   finalizeSession,
@@ -62,7 +62,7 @@ describe("handlePromptEnqueued", () => {
 
 describe("handleExecutionStarted", () => {
   test("starts a run span and attaches the pending prompt", () => {
-    process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "true"
+    process.env.OPENCODE_CAPTURE_CONTENT = "true"
     try {
       const { ctx, tracer } = makeCtx()
       handleSessionCreated(evt("session.created", { sessionID: "ses_1" }), ctx)
@@ -75,7 +75,7 @@ describe("handleExecutionStarted", () => {
       expect(ctx.tracing.runSpans.has("ses_1")).toBe(true)
       expect(ctx.tracing.activePrompts.get("ses_1")!.text).toBe("hello")
     } finally {
-      delete process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+      delete process.env.OPENCODE_CAPTURE_CONTENT
     }
   })
 
@@ -138,7 +138,7 @@ describe("handleExecutionStarted", () => {
   })
 
   test("retains a prompt queued during the current execution for the next run", () => {
-    process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "true"
+    process.env.OPENCODE_CAPTURE_CONTENT = "true"
     try {
       const { ctx, tracer } = makeCtx()
       handleSessionCreated(evt("session.created", { sessionID: "ses_1", projectID: "p" }), ctx)
@@ -155,12 +155,12 @@ describe("handleExecutionStarted", () => {
       handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
       expect(tracer.spans.at(-1)?.attributes["input.value"]).toBe("second")
     } finally {
-      delete process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+      delete process.env.OPENCODE_CAPTURE_CONTENT
     }
   })
 
   test("applies a steering prompt to the current run, not the next run", () => {
-    process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "true"
+    process.env.OPENCODE_CAPTURE_CONTENT = "true"
     try {
       const { ctx, tracer } = makeCtx()
       handleSessionCreated(evt("session.created", { sessionID: "ses_1", projectID: "p" }), ctx)
@@ -180,7 +180,7 @@ describe("handleExecutionStarted", () => {
       handleExecutionStarted(evt("session.execution.started", { sessionID: "ses_1" }), ctx)
       expect(tracer.spans.at(-1)?.attributes["input.value"]).toBe("second")
     } finally {
-      delete process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+      delete process.env.OPENCODE_CAPTURE_CONTENT
     }
   })
 })

@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test"
+﻿import { describe, test, expect } from "bun:test"
 import { SpanStatusCode } from "@opentelemetry/api"
 import { handleToolCalled, handleToolFailed, handleToolInputStarted, handleToolSuccess } from "../../src/handlers/tool.ts"
 import { handleExecutionStarted, handleSessionCreated } from "../../src/handlers/session.ts"
@@ -42,7 +42,7 @@ describe("handleToolInputStarted", () => {
 
 describe("handleToolCalled", () => {
   test("attaches parameters and detects a local git commit", () => {
-    process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "true"
+    process.env.OPENCODE_CAPTURE_CONTENT = "true"
     try {
       const { ctx, counters, logger, tracer } = makeCtx()
       seed(ctx)
@@ -56,7 +56,7 @@ describe("handleToolCalled", () => {
       expect(span.attributes["input.value"]).toContain("git commit")
       expect(span.attributes["tool.provider_executed"]).toBe(false)
     } finally {
-      delete process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+      delete process.env.OPENCODE_CAPTURE_CONTENT
     }
   })
 
@@ -81,7 +81,7 @@ describe("handleToolCalled", () => {
 
 describe("handleToolSuccess", () => {
   test("records a locally executed tool", () => {
-    process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "true"
+    process.env.OPENCODE_CAPTURE_CONTENT = "true"
     try {
       const { ctx, histograms, logger, tracer } = makeCtx()
       seed(ctx)
@@ -100,7 +100,7 @@ describe("handleToolSuccess", () => {
       expect(span.status.code).toBe(SpanStatusCode.OK)
       expect(span.attributes["output.value"]).toBe("file body")
     } finally {
-      delete process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+      delete process.env.OPENCODE_CAPTURE_CONTENT
     }
   })
 

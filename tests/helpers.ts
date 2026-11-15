@@ -246,7 +246,7 @@ export function makeCtx(
     disabledMetrics: new Set(disabledMetrics),
     disabledTraces: new Set(disabledTraces),
     combineReasoningTokens,
-    captureContent: ["true", "1"].includes((process.env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] ?? "").toLowerCase()),
+    captureContent: !!process.env["OPENCODE_CAPTURE_CONTENT"],
     tracer: tracer as unknown as Tracer,
     tracePrefix: "opencode.",
     rootContext: () => ROOT_CONTEXT,

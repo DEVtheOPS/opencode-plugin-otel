@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test"
+﻿import { describe, test, expect } from "bun:test"
 import { SpanStatusCode } from "@opentelemetry/api"
 import { handleStepEnded, handleStepFailed, handleStepStarted, handleTextEnded } from "../../src/handlers/step.ts"
 import { handleExecutionStarted, handleSessionCreated } from "../../src/handlers/session.ts"
@@ -35,7 +35,7 @@ describe("handleStepStarted", () => {
 
 describe("handleStepEnded", () => {
   test("records token, cost, cache, message, and model metrics and ends the span", () => {
-    process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "true"
+    process.env.OPENCODE_CAPTURE_CONTENT = "true"
     try {
       const { ctx, tracer, counters, logger } = makeCtx()
       seedSession(ctx)
@@ -60,11 +60,11 @@ describe("handleStepEnded", () => {
       expect(llm.attributes["output.value"]).toBe("hello\nworld")
       expect(llm.attributes["llm.output_messages"]).toBe('[{"role":"assistant","content":"hello\\nworld"}]')
     } finally {
-      delete process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+      delete process.env.OPENCODE_CAPTURE_CONTENT
     }
   })
 
-  test("omits prompt and output content unless OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT is enabled", () => {
+  test("omits prompt and output content unless OPENCODE_CAPTURE_CONTENT is enabled", () => {
     const { ctx, tracer } = makeCtx()
     seedSession(ctx)
     ctx.tracing.activePrompts.set("ses_1", { text: "secret prompt", startMs: 1 })
