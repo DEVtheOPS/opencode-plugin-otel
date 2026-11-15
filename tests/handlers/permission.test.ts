@@ -1,31 +1,56 @@
 import { describe, test, expect } from "bun:test"
-import { handlePermissionAsked, handlePermissionReplied } from "../../src/handlers/permission.ts"
+import { SpanStatusCode } from "@opentelemetry/api"
+import { handlePermissionAsked, handlePermissionReplied, sweepPermissionSpans } from "../../src/handlers/permission.ts"
+import { handleStepStarted } from "../../src/handlers/step.ts"
 import { makeCtx, evt } from "../helpers.ts"
 
-describe("handlePermissionAsked", () => {
-  test("stores the pending permission", () => {
-    const { ctx } = makeCtx()
-    handlePermissionAsked(evt("permission.asked", { id: "perm_1", sessionID: "ses_1", action: "bash", resources: ["git push"] }), ctx)
-    expect(ctx.tracing.pendingPermissions.get("perm_1")!.action).toBe("bash")
-  })
-})
+function asked(id = "perm_1", at = 1000) {
+  return evt("permission.asked", { id, sessionID: "ses_1", action: "bash", resources: ["ls -la"] }, at)
+}
 
-describe("handlePermissionReplied", () => {
-  test("emits an accept tool_decision", () => {
-    const { ctx, logger } = makeCtx()
-    handlePermissionAsked(evt("permission.asked", { id: "perm_1", sessionID: "ses_1", action: "bash", resources: ["git push"] }), ctx)
-    handlePermissionReplied(evt("permission.replied", { sessionID: "ses_1", requestID: "perm_1", reply: "always" }), ctx)
-    const record = logger.records.at(-1)!
-    expect(record.body).toBe("tool_decision")
-    expect(record.attributes?.["decision"]).toBe("accept")
-    expect(record.attributes?.["tool_name"]).toBe("bash")
-    expect(record.attributes?.["source"]).toBe("always")
+function replied(id = "perm_1", reply: "accept" | "reject" | "always" = "accept", at = 5000) {
+  return evt("permission.replied", { requestID: id, sessionID: "ses_1", reply }, at)
+}
+
+describe("permission spans", () => {
+  test("records the approval wait under the active step span", () => {
+    const { ctx, tracer } = makeCtx()
+    handleStepStarted(evt("session.step.started", { sessionID: "ses_1", assistantMessageID: "msg_1", agent: "build", model: { id: "m", providerID: "p" }, started: 1 }), ctx)
+    handlePermissionAsked(asked(), ctx)
+    handlePermissionReplied(replied(), ctx)
+    const step = tracer.spans.find((s) => s.name === "opencode.llm")!
+    const span = tracer.spans.find((s) => s.name === "opencode.permission")!
+    expect(span.parentSpanContext).toBe(step.spanContext())
+    expect(span.startTime).toBe(1000)
+    expect(span.endTime).toBe(5000)
+    expect(span.attributes["permission.decision"]).toBe("accept")
+    expect(span.status.code).toBe(SpanStatusCode.OK)
+    expect(ctx.tracing.permissionSpans.size).toBe(0)
   })
 
-  test("emits a reject tool_decision", () => {
-    const { ctx, logger } = makeCtx()
-    handlePermissionAsked(evt("permission.asked", { id: "perm_2", sessionID: "ses_1", action: "edit", resources: ["a.ts"] }), ctx)
-    handlePermissionReplied(evt("permission.replied", { sessionID: "ses_1", requestID: "perm_2", reply: "reject" }), ctx)
-    expect(logger.records.at(-1)!.attributes?.["decision"]).toBe("reject")
+  test("falls back to the run span when no step is active", () => {
+    const { ctx, tracer } = makeCtx()
+    handlePermissionAsked(asked(), ctx)
+    handlePermissionReplied(replied("perm_1", "reject"), ctx)
+    const span = tracer.spans.find((s) => s.name === "opencode.permission")!
+    expect(span.attributes["permission.decision"]).toBe("reject")
+    expect(span.status.code).toBe(SpanStatusCode.ERROR)
+  })
+
+  test("does not create spans when permission tracing is disabled", () => {
+    const { ctx, tracer } = makeCtx("proj_test", [], ["permission"])
+    handlePermissionAsked(asked(), ctx)
+    handlePermissionReplied(replied(), ctx)
+    expect(tracer.spans.filter((s) => s.name === "opencode.permission")).toHaveLength(0)
+  })
+
+  test("sweep ends a permission span that was never answered", () => {
+    const { ctx, tracer } = makeCtx()
+    handlePermissionAsked(asked(), ctx)
+    sweepPermissionSpans("ses_1", ctx)
+    const span = tracer.spans.find((s) => s.name === "opencode.permission")!
+    expect(span.ended).toBe(true)
+    expect(span.attributes["permission.decision"]).toBe("cancelled")
+    expect(span.status.code).toBe(SpanStatusCode.ERROR)
   })
 })

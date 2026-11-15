@@ -145,6 +145,7 @@ export function makeTracingState(): TracingState {
     stepSpanContexts: new Map(),
     toolSpans: new Map(),
     toolSpanContexts: new Map(),
+    permissionSpans: new Map(),
     subagentParents: new Map(),
     consumedSubagentDispatches: new Set(),
     toolMeta: new Map(),

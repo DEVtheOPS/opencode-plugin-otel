@@ -155,6 +155,7 @@ export type TracingState = {
   stepSpanContexts: Map<string, SpanContext>
   toolSpans: Map<string, Span>
   toolSpanContexts: Map<string, SpanContext>
+  permissionSpans: Map<string, Span>
   subagentParents: Map<string, { spanContext: SpanContext; callID: string }>
   consumedSubagentDispatches: Set<string>
   toolMeta: Map<string, ToolMeta>

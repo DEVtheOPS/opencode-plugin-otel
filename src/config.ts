@@ -4,7 +4,7 @@ import { LEVELS, type Level } from "./types.ts"
 export type MetricsTemporality = "cumulative" | "delta" | "lowmemory"
 
 /** Valid trace types emitted by the plugin. */
-export const TRACE_TYPES = ["session", "llm", "tool"] as const
+export const TRACE_TYPES = ["session", "llm", "tool", "permission"] as const
 
 const VALID_TEMPORALITIES: ReadonlySet<MetricsTemporality> = new Set<MetricsTemporality>(["cumulative", "delta", "lowmemory"])
 const TRACE_DISABLE_ALL_VALUES = new Set(["all", "*", "true", "1"])

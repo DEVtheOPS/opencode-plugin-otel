@@ -22,6 +22,7 @@ import {
   setBoundedMap,
   totalTokens,
 } from "../util.ts"
+import { sweepPermissionSpans } from "./permission.ts"
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 
@@ -426,4 +427,5 @@ function sweepExecution(sessionID: string, ctx: HandlerContext) {
   for (const [id, perm] of ctx.tracing.pendingPermissions) {
     if (perm.sessionID === sessionID) ctx.tracing.pendingPermissions.delete(id)
   }
+  sweepPermissionSpans(sessionID, ctx)
 }
