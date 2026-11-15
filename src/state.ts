@@ -61,6 +61,7 @@ export async function acquireSharedOtel(config: PluginConfig, version: string): 
         version,
         config.otlpHeaders,
         config.otlpHeadersHelper,
+        config.otlpProxyUrl,
         config.resourceAttributes,
         config.metricsTemporality,
       )

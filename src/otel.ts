@@ -43,6 +43,34 @@ export function buildResource(version: string, resourceAttributes = process.env[
   return resourceFromAttributes(attrs)
 }
 
+export function proxyBypassed(
+  endpoint: string,
+  noProxy: string | undefined = process.env["NO_PROXY"] ?? process.env["no_proxy"],
+): boolean {
+  let hostname: string
+  let hostWithPort: string
+  try {
+    const url = new URL(endpoint)
+    hostname = url.hostname.toLowerCase()
+    const defaultPort = url.protocol === "https:" ? "443" : url.protocol === "http:" ? "80" : ""
+    const port = url.port || defaultPort
+    hostWithPort = port ? `${hostname}:${port}` : hostname
+  } catch {
+    return false
+  }
+  if (hostname === "localhost" || hostname === "::1" || hostname === "[::1]" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true
+  if (!noProxy) return false
+  for (const entry of noProxy.split(",")) {
+    const pattern = entry.trim().toLowerCase()
+    if (!pattern) continue
+    if (pattern === "*") return true
+    const normalized = pattern.startsWith(".") ? pattern.slice(1) : pattern
+    if (hostWithPort === normalized || hostWithPort.endsWith("." + normalized)) return true
+    if (hostname === normalized || hostname.endsWith("." + normalized)) return true
+  }
+  return false
+}
+
 /** Handles returned by `setupOtel`, used for graceful shutdown. */
 export type OtelProviders = {
   meterProvider: MeterProvider
@@ -104,6 +132,7 @@ export async function setupOtel(
   version: string,
   otlpHeaders?: string,
   otlpHeadersHelper?: string,
+  otlpProxyUrl?: string,
   resourceAttributes?: string,
   metricsTemporality?: MetricsTemporality,
 ): Promise<OtelProviders> {
@@ -111,6 +140,19 @@ export async function setupOtel(
   const staticHeaders = parseOtlpHeaders(otlpHeaders)
   const dynamicHeaders = new DynamicHeaders(staticHeaders, otlpHeadersHelper)
   const temporalityPreference = metricTemporalityPreference(metricsTemporality)
+  const effectiveProxyUrl = otlpProxyUrl && !proxyBypassed(endpoint) ? otlpProxyUrl : undefined
+  const agentOptions = effectiveProxyUrl
+    ? {
+        httpAgentOptions: ((protocol: string) => {
+          if (protocol === "http:") {
+            const { HttpProxyAgent } = require("http-proxy-agent") as typeof import("http-proxy-agent")
+            return new HttpProxyAgent(effectiveProxyUrl)
+          }
+          const { HttpsProxyAgent } = require("https-proxy-agent") as typeof import("https-proxy-agent")
+          return new HttpsProxyAgent(effectiveProxyUrl)
+        }) as import("@opentelemetry/otlp-exporter-base").OTLPExporterNodeConfigBase["httpAgentOptions"],
+      }
+    : {}
   if (otlpHeadersHelper) {
     try {
       await dynamicHeaders.refresh()
@@ -119,19 +161,19 @@ export async function setupOtel(
     }
   }
   const makeMetricExporter = (headers: HeadersMap) => withoutOtlpHeaderEnvironment(() => protocol === "http/protobuf"
-    ? new OTLPProtoMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers, temporalityPreference })
+    ? new OTLPProtoMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers, temporalityPreference, ...agentOptions })
     : protocol === "http/json"
-      ? new OTLPHttpMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers, temporalityPreference })
+      ? new OTLPHttpMetricExporter({ url: buildHttpSignalUrl(endpoint, "metrics"), headers, temporalityPreference, ...agentOptions })
       : new OTLPMetricExporter({ url: endpoint, metadata: createGrpcMetadata(headers), temporalityPreference }))
   const makeLogExporter = (headers: HeadersMap) => withoutOtlpHeaderEnvironment(() => protocol === "http/protobuf"
-    ? new OTLPProtoLogExporter({ url: buildHttpSignalUrl(endpoint, "logs"), headers })
+    ? new OTLPProtoLogExporter({ url: buildHttpSignalUrl(endpoint, "logs"), headers, ...agentOptions })
     : protocol === "http/json"
-      ? new OTLPHttpLogExporter({ url: buildHttpSignalUrl(endpoint, "logs"), headers })
+      ? new OTLPHttpLogExporter({ url: buildHttpSignalUrl(endpoint, "logs"), headers, ...agentOptions })
       : new OTLPLogExporter({ url: endpoint, metadata: createGrpcMetadata(headers) }))
   const makeTraceExporter = (headers: HeadersMap) => withoutOtlpHeaderEnvironment(() => protocol === "http/protobuf"
-    ? new OTLPProtoTraceExporter({ url: buildHttpSignalUrl(endpoint, "traces"), headers })
+    ? new OTLPProtoTraceExporter({ url: buildHttpSignalUrl(endpoint, "traces"), headers, ...agentOptions })
     : protocol === "http/json"
-      ? new OTLPHttpTraceExporter({ url: buildHttpSignalUrl(endpoint, "traces"), headers })
+      ? new OTLPHttpTraceExporter({ url: buildHttpSignalUrl(endpoint, "traces"), headers, ...agentOptions })
       : new OTLPTraceExporter({ url: endpoint, metadata: createGrpcMetadata(headers) }))
   const metricExporter = otlpHeadersHelper
     ? new RefreshingMetricExporter(makeMetricExporter, dynamicHeaders)
