@@ -18,6 +18,7 @@ import {
   isTraceEnabled,
   markSeen,
   modelRef,
+  redactErrorMessage,
   resolveSubagentTraceContext,
   setBoundedMap,
   totalTokens,
@@ -258,8 +259,8 @@ export function handleExecutionEnded(
     }
     if (outcome.type === "failed") {
       const message = errorSummary(outcome.error)
-      span.setStatus({ code: SpanStatusCode.ERROR, message })
-      span.setAttribute("error", message)
+      span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.captureContent ? message : redactErrorMessage(message) })
+      span.setAttribute("error", ctx.captureContent ? message : redactErrorMessage(message))
     } else if (outcome.type === "interrupted") {
       span.setAttribute("session.interrupted_reason", outcome.reason)
       span.setStatus({ code: SpanStatusCode.OK })

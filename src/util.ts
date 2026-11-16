@@ -34,6 +34,12 @@ export function errorSummary(err: StructuredError | undefined): string {
   return `${err.type}: ${err.message}`
 }
 
+export function redactErrorMessage(message: string): string {
+  return message
+    .replace(/\b(?:for|with|query|search(?:ing)?\s+for)\s+.+$/i, " for [redacted]")
+    .slice(0, 128)
+}
+
 /** Returns the canonical OTel GenAI provider name, preserving unknown provider IDs. */
 export function genAiProviderName(providerID: string): string {
   return GEN_AI_PROVIDER_NAMES[providerID] ?? providerID
