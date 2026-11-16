@@ -65,8 +65,8 @@ function accumulateTotals(
   if (!existing) return
   const next: SessionTotals = {
     ...existing,
-    tokens,
-    cost,
+    tokens: tokens > 0 ? tokens : existing.tokens,
+    cost: existing.cost + cost,
     messages: existing.messages + (incrementMessages ? 1 : 0),
   }
   setBoundedMap(ctx.tracing.sessionTotals, sessionID, next)
