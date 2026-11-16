@@ -31,6 +31,11 @@ function textParts(parts: readonly unknown[]): string {
     .slice(0, 1_000)
 }
 
+/** How long a primary model request waits for queued step events before trusting the recorded active LLM span. */
+const ACTIVE_LLM_SETTLE_MS = 200
+/** Granularity of the active-LLM settle loop. */
+const ACTIVE_LLM_SETTLE_TICK_MS = 15
+
 /** Stores a bounded text-only preview of the primary model-visible request. */
 export function captureModelContext(event: ModelVisibleContextEvent, ctx: HandlerContext): void {
   const entries = [
@@ -91,6 +96,24 @@ export async function handleModelRequest(event: ModelRequestEvent, ctx: HandlerC
   if (!isTraceEnabled("llm", ctx)) return
   ensureRunSpan(event.sessionID, Date.now(), ctx)
   let active = ctx.tracing.activeLlm.get(event.sessionID)
+  if (active) {
+    // The next step's request can fire before session.step.ended of the previous step is
+    // delivered (opencode publishes session.step.started only after a forked snapshot that
+    // overlaps the provider request, and the durable bus lags the request loop), so the
+    // recorded active LLM span may already belong to a finished step. Wait briefly for the
+    // queued step events to land: if the entry is cleared or replaced we propagate the fresh
+    // context instead, and if nothing changes we are looking at a genuine in-flight retry.
+    const deadline = Date.now() + ACTIVE_LLM_SETTLE_MS
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, ACTIVE_LLM_SETTLE_TICK_MS))
+      await ctx.tracing.eventQueue
+      const current = ctx.tracing.activeLlm.get(event.sessionID)
+      if (!current || current.spanContext.spanId !== active.spanContext.spanId) {
+        active = current
+        break
+      }
+    }
+  }
   if (!active) {
     const span = ctx.tracer.startSpan(
       `${ctx.tracePrefix}llm`,
