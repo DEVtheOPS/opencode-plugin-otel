@@ -65,7 +65,7 @@ function accumulateTotals(
   if (!existing) return
   const next: SessionTotals = {
     ...existing,
-    tokens: existing.tokens + tokens,
+    tokens: tokens > 0 ? tokens : existing.tokens,
     cost: existing.cost + cost,
     messages: existing.messages + (incrementMessages ? 1 : 0),
   }
