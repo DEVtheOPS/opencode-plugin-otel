@@ -135,7 +135,12 @@ export function resolveRunContext(sessionID: string, ctx: HandlerContext): Conte
   const span = ctx.tracing.runSpans.get(sessionID)
   if (span) return trace.setSpan(base, span)
   const spanContext = ctx.tracing.runSpanContexts.get(sessionID)
-  return spanContext ? trace.setSpanContext(base, spanContext) : base
+  if (spanContext) return trace.setSpanContext(base, spanContext)
+  const dispatch = ctx.tracing.subagentParents.get(sessionID)
+  if (dispatch) return trace.setSpanContext(base, dispatch.spanContext)
+  const parentID = ctx.tracing.sessionIdentity.get(sessionID)?.parentID
+  if (parentID && parentID !== sessionID) return resolveRunContext(parentID, ctx)
+  return base
 }
 
 /** Resolves the trace context for a step span, falling back to its run context. */

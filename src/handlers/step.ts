@@ -24,7 +24,7 @@ import {
   SESSION_ID,
 } from "@arizeai/openinference-semantic-conventions"
 import type { EventOf, HandlerContext, SessionTotals } from "../types.ts"
-import { ensureSession } from "./session.ts"
+import { ensureRunSpan, ensureSession } from "./session.ts"
 import { applyModelContext } from "./chat-headers.ts"
 import {
   agentAttrs,
@@ -91,7 +91,9 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
   }
 
   if (!isTraceEnabled("llm", ctx)) return
+  ensureRunSpan(d.sessionID, d.started ?? e.created, ctx)
   const rawPrompt = ctx.tracing.activePrompts.get(d.sessionID)?.text
+    ?? (ctx.tracing.activeExecutions.has(d.sessionID) ? undefined : ctx.tracing.pendingPrompts.get(d.sessionID)?.[0]?.text)
   const promptText = rawPrompt !== undefined ? rawPrompt.slice(0, 64_000) : undefined
   const attributes = {
     [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.LLM,

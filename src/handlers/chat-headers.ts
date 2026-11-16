@@ -3,6 +3,7 @@ import { AGENT_NAME, INPUT_MIME_TYPE, INPUT_VALUE, LLM_INPUT_MESSAGES, LLM_MODEL
 import type { HandlerContext } from "../types.ts"
 import { injectTraceContext } from "../trace-context.ts"
 import { genAiProviderName, isTraceEnabled, resolveRunContext, setBoundedMap } from "../util.ts"
+import { ensureRunSpan } from "./session.ts"
 
 /** The `session.hook("model.request", ...)` event shape consumed by this handler. */
 export type ModelRequestEvent = {
@@ -66,12 +67,29 @@ export function applyModelContext(
 
 /** Injects the active LLM span's W3C trace context into outbound model requests. */
 export async function handleModelRequest(event: ModelRequestEvent, ctx: HandlerContext): Promise<void> {
-  if (event.kind !== "primary") return
   const providerID = event.model.providerID
   const propagate = ctx.tracePropagationProviders.has(providerID) || ctx.tracePropagationProviders.has("*")
   if (!propagate && !ctx.tracing.modelContexts.has(event.sessionID)) return
-  if (!isTraceEnabled("llm", ctx)) return
   await ctx.tracing.eventQueue
+  if (event.kind !== "primary") {
+    if (propagate && isTraceEnabled("session", ctx)) {
+      const dispatch = ctx.tracing.subagentParents.get(event.sessionID)
+      if (dispatch) {
+        injectTraceContext(dispatch.spanContext, event.headers)
+      } else if (ctx.tracing.activeExecutions.has(event.sessionID)) {
+        ensureRunSpan(event.sessionID, Date.now(), ctx)
+        const runContext = ctx.tracing.runSpanContexts.get(event.sessionID)
+        if (runContext) injectTraceContext(runContext, event.headers)
+      } else {
+        const parentID = ctx.tracing.sessionIdentity.get(event.sessionID)?.parentID
+        const parentContext = parentID ? ctx.tracing.runSpanContexts.get(parentID) : undefined
+        if (parentContext) injectTraceContext(parentContext, event.headers)
+      }
+    }
+    return
+  }
+  if (!isTraceEnabled("llm", ctx)) return
+  ensureRunSpan(event.sessionID, Date.now(), ctx)
   let active = ctx.tracing.activeLlm.get(event.sessionID)
   if (!active) {
     const span = ctx.tracer.startSpan(

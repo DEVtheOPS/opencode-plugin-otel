@@ -177,6 +177,33 @@ export function handleAgentSelected(e: EventOf<"session.agent.selected">, ctx: H
 }
 
 /** Starts the root run span for a single execution (user turn), keyed by session id. */
+export function ensureRunSpan(sessionID: string, at: number, ctx: HandlerContext): void {
+  if (ctx.tracing.runSpans.has(sessionID)) return
+  if (!isTraceEnabled("session", ctx)) return
+  const identity = ctx.tracing.sessionIdentity.get(sessionID)
+  if (identity?.agentType === "subagent") return
+  const startMs = ctx.tracing.activePrompts.get(sessionID)?.startMs
+    ?? ctx.tracing.pendingPrompts.get(sessionID)?.[0]?.startMs
+    ?? at
+  const span = ctx.tracer.startSpan(
+    `${ctx.tracePrefix}session`,
+    {
+      startTime: startMs,
+      attributes: {
+        [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.AGENT,
+        [SESSION_ID]: sessionID,
+        [AGENT_NAME]: identity?.agent ?? "unknown",
+        "agent.type": identity?.agentType ?? "primary",
+        "session.is_subagent": false,
+        ...ctx.commonAttrs,
+      },
+    },
+    ctx.rootContext(),
+  )
+  setBoundedMap(ctx.tracing.runSpans, sessionID, span)
+  setBoundedMap(ctx.tracing.runSpanContexts, sessionID, span.spanContext())
+}
+
 export function handleExecutionStarted(e: EventOf<"session.execution.started">, ctx: HandlerContext) {
   const sessionID = e.data.sessionID
   markSeen(ctx.tracing.activeExecutions, sessionID)
@@ -189,10 +216,29 @@ export function handleExecutionStarted(e: EventOf<"session.execution.started">, 
   if (!isTraceEnabled("session", ctx)) return
 
   const isSubagent = totals?.agentType === "subagent"
+  const promptText = pendingPrompt?.text ?? ""
+  const promptAttrs = promptText && ctx.captureContent
+    ? {
+        [INPUT_VALUE]: promptText,
+        [INPUT_MIME_TYPE]: MimeType.TEXT,
+        [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
+      }
+    : {}
+
+  const existing = ctx.tracing.runSpans.get(sessionID)
+  if (existing) {
+    existing.setAttributes({
+      [AGENT_NAME]: totals?.agent ?? "unknown",
+      "agent.type": totals?.agentType ?? "primary",
+      ...promptAttrs,
+    })
+    setBoundedMap(ctx.tracing.runSpanContexts, sessionID, existing.spanContext())
+    return
+  }
+
   const parentCtx = isSubagent && totals?.parentID
     ? resolveSubagentTraceContext(sessionID, totals.parentID, totals.agent, ctx)
     : ctx.rootContext()
-  const promptText = pendingPrompt?.text ?? ""
 
   const span = ctx.tracer.startSpan(
     `${ctx.tracePrefix}session`,
@@ -204,13 +250,7 @@ export function handleExecutionStarted(e: EventOf<"session.execution.started">, 
         [AGENT_NAME]: totals?.agent ?? "unknown",
         "agent.type": totals?.agentType ?? "primary",
         "session.is_subagent": isSubagent,
-        ...(promptText && ctx.captureContent
-          ? {
-              [INPUT_VALUE]: promptText,
-              [INPUT_MIME_TYPE]: MimeType.TEXT,
-              [LLM_INPUT_MESSAGES]: JSON.stringify([{ role: "user", content: promptText }]),
-            }
-          : {}),
+        ...promptAttrs,
         ...ctx.commonAttrs,
       },
     },
@@ -338,6 +378,12 @@ export function finalizeSession(sessionID: string, ctx: HandlerContext) {
   const totals = ctx.tracing.sessionTotals.get(sessionID)
   if (!totals) {
     sweepExecution(sessionID, ctx)
+    const danglingRun = ctx.tracing.runSpans.get(sessionID)
+    if (danglingRun) {
+      danglingRun.end()
+      ctx.tracing.runSpans.delete(sessionID)
+      ctx.tracing.runSpanContexts.delete(sessionID)
+    }
     return
   }
   const identity = ctx.tracing.sessionIdentity.get(sessionID)
@@ -357,6 +403,12 @@ export function finalizeSession(sessionID: string, ctx: HandlerContext) {
   ctx.tracing.modelContexts.delete(sessionID)
   ctx.tracing.activePrompts.delete(sessionID)
   ctx.tracing.activeExecutions.delete(sessionID)
+  const danglingRun = ctx.tracing.runSpans.get(sessionID)
+  if (danglingRun) {
+    danglingRun.end()
+    ctx.tracing.runSpans.delete(sessionID)
+    ctx.tracing.runSpanContexts.delete(sessionID)
+  }
 
   const attrs = { ...ctx.commonAttrs, "session.id": sessionID }
   const durationMs = Date.now() - totals.startMs
