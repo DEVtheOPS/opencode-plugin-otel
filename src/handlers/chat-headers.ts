@@ -88,7 +88,8 @@ export async function handleModelRequest(event: ModelRequestEvent, ctx: HandlerC
       } else {
         const parentID = ctx.tracing.sessionIdentity.get(event.sessionID)?.parentID
         const parentContext = parentID ? ctx.tracing.runSpanContexts.get(parentID) : undefined
-        if (parentContext) injectTraceContext(parentContext, event.headers)
+        const fallback = parentContext ?? ctx.tracing.runSpanContexts.get(event.sessionID)
+        if (fallback) injectTraceContext(fallback, event.headers)
       }
     }
     return
