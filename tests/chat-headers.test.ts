@@ -19,6 +19,38 @@ describe("handleModelRequest", () => {
     expect(headers["traceparent"]).toBe("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
   })
 
+  test("injects the step provisional context when assistantMessageID is provided", async () => {
+    const { ctx } = makeCtx()
+    ctx.tracePropagationProviders.add("litellm")
+    const headers: Record<string, string> = {}
+    await handleModelRequest({ sessionID: "ses_1", agent: "build", model: { providerID: "litellm", id: "m" }, kind: "primary", assistantMessageID: "msg_step1", headers }, ctx)
+    expect(headers["traceparent"]).toBeDefined()
+    const provisional = ctx.tracing.pendingProvisionals.get("msg_step1")
+    expect(provisional).toBeDefined()
+    expect(headers["traceparent"]).toContain(provisional!.spanContext().spanId)
+  })
+
+  test("reuses the same provisional for a retry with the same assistantMessageID", async () => {
+    const { ctx } = makeCtx()
+    ctx.tracePropagationProviders.add("litellm")
+    const first: Record<string, string> = {}
+    await handleModelRequest({ sessionID: "ses_1", agent: "build", model: { providerID: "litellm", id: "m" }, kind: "primary", assistantMessageID: "msg_retry", headers: first }, ctx)
+    const second: Record<string, string> = {}
+    await handleModelRequest({ sessionID: "ses_1", agent: "build", model: { providerID: "litellm", id: "m" }, kind: "primary", assistantMessageID: "msg_retry", headers: second }, ctx)
+    expect(second["traceparent"]).toBe(first["traceparent"])
+  })
+
+  test("injects the adopted step span context on a retry after the step started", async () => {
+    const { ctx } = makeCtx()
+    ctx.tracePropagationProviders.add("litellm")
+    const headers: Record<string, string> = {}
+    await handleModelRequest({ sessionID: "ses_1", agent: "build", model: { providerID: "litellm", id: "m" }, kind: "primary", assistantMessageID: "msg_adopt", headers }, ctx)
+    handleStepStarted(evt("session.step.started", { sessionID: "ses_1", assistantMessageID: "msg_adopt", agent: "build", model: { providerID: "litellm", id: "m" } }), ctx)
+    const retry: Record<string, string> = {}
+    await handleModelRequest({ sessionID: "ses_1", agent: "build", model: { providerID: "litellm", id: "m" }, kind: "primary", assistantMessageID: "msg_adopt", headers: retry }, ctx)
+    expect(retry["traceparent"]).toContain(ctx.tracing.stepSpanContexts.get("msg_adopt")!.spanId)
+  })
+
   test("does nothing when the provider is not configured", async () => {
     const { ctx } = makeCtx()
     ctx.tracing.activeLlm.set("ses_1", { agent: "build", modelID: "m", providerID: "openai", spanContext: SPAN_CONTEXT })

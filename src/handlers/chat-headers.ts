@@ -97,7 +97,7 @@ export async function handleModelRequest(event: ModelRequestEvent, ctx: HandlerC
   ensureRunSpan(event.sessionID, Date.now(), ctx)
   const stepID = event.assistantMessageID
   if (stepID !== undefined) {
-    const pending = ctx.tracing.pendingProvisionals.get(stepID)
+    let pending = ctx.tracing.pendingProvisionals.get(stepID)
     const adopted = ctx.tracing.stepSpanContexts.get(stepID)
     if (!pending && !adopted) {
       const span = ctx.tracer.startSpan(
@@ -125,6 +125,7 @@ export async function handleModelRequest(event: ModelRequestEvent, ctx: HandlerC
         providerID,
         spanContext: span.spanContext(),
       })
+      pending = span
     }
     const spanCtx = adopted ?? pending?.spanContext()
     const span = pending ?? ctx.tracing.activeStepSpans.get(event.sessionID)
