@@ -11,6 +11,7 @@ export type ModelRequestEvent = {
   agent: string
   model: { providerID: string; id: string }
   kind: string
+  assistantMessageID?: string
   headers: Record<string, string>
 }
 
@@ -94,6 +95,43 @@ export async function handleModelRequest(event: ModelRequestEvent, ctx: HandlerC
   }
   if (!isTraceEnabled("llm", ctx)) return
   ensureRunSpan(event.sessionID, Date.now(), ctx)
+  const stepID = event.assistantMessageID
+  if (stepID !== undefined) {
+    const pending = ctx.tracing.pendingProvisionals.get(stepID)
+    const adopted = ctx.tracing.stepSpanContexts.get(stepID)
+    if (!pending && !adopted) {
+      const span = ctx.tracer.startSpan(
+        `${ctx.tracePrefix}llm`,
+        {
+          startTime: Date.now(),
+          kind: SpanKind.CLIENT,
+          attributes: {
+            [SemanticConventions.OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.LLM,
+            [SESSION_ID]: event.sessionID,
+            [AGENT_NAME]: event.agent,
+            [LLM_MODEL_NAME]: event.model.id,
+            [LLM_PROVIDER]: providerID,
+            "gen_ai.provider.name": genAiProviderName(providerID),
+            ...ctx.commonAttrs,
+          },
+        },
+        resolveRunContext(event.sessionID, ctx),
+      )
+      setBoundedMap(ctx.tracing.provisionalLlm, event.sessionID, span)
+      setBoundedMap(ctx.tracing.pendingProvisionals, stepID, span)
+      setBoundedMap(ctx.tracing.activeLlm, event.sessionID, {
+        agent: event.agent,
+        modelID: event.model.id,
+        providerID,
+        spanContext: span.spanContext(),
+      })
+    }
+    const spanCtx = adopted ?? pending?.spanContext()
+    const span = pending ?? ctx.tracing.activeStepSpans.get(event.sessionID)
+    if (span) applyModelContext(event.sessionID, event.agent, event.model, span, ctx, ctx.tracing.provisionalLlm.has(event.sessionID))
+    if (propagate && spanCtx) injectTraceContext(spanCtx, event.headers)
+    return
+  }
   let active = ctx.tracing.activeLlm.get(event.sessionID)
   if (active) {
     const deadline = Date.now() + ACTIVE_LLM_SETTLE_MS

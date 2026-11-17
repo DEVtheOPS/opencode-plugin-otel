@@ -138,6 +138,7 @@ export function makeTracingState(): TracingState {
   return {
     seenEvents: new Set(),
     eventQueue: Promise.resolve(),
+    pendingProvisionals: new Map(),
     runSpans: new Map(),
     runSpanContexts: new Map(),
     stepSpans: new Map(),

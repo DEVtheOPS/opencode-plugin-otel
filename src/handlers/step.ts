@@ -114,6 +114,28 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
     ...ctx.commonAttrs,
   }
   const active = ctx.tracing.activeLlm.get(d.sessionID)
+  const exact = ctx.tracing.pendingProvisionals.get(d.assistantMessageID)
+  if (exact) {
+    ctx.tracing.pendingProvisionals.delete(d.assistantMessageID)
+    const stale = ctx.tracing.provisionalLlm.get(d.sessionID)
+    ctx.tracing.provisionalLlm.delete(d.sessionID)
+    if (stale && stale !== exact) {
+      stale.setStatus({ code: SpanStatusCode.ERROR, message: "model request did not match step" })
+      stale.end()
+    }
+    exact.setAttributes(attributes)
+    applyModelContext(d.sessionID, d.agent, d.model, exact, ctx)
+    setBoundedMap(ctx.tracing.stepSpans, d.assistantMessageID, exact)
+    setBoundedMap(ctx.tracing.activeStepSpans, d.sessionID, exact)
+    setBoundedMap(ctx.tracing.stepSpanContexts, d.assistantMessageID, exact.spanContext())
+    setBoundedMap(ctx.tracing.activeLlm, d.sessionID, {
+      agent: d.agent,
+      modelID: d.model.id,
+      providerID: d.model.providerID,
+      spanContext: exact.spanContext(),
+    })
+    return
+  }
   const provisional = ctx.tracing.provisionalLlm.get(d.sessionID)
   ctx.tracing.provisionalLlm.delete(d.sessionID)
   const matches = provisional && active?.agent === d.agent && active.modelID === d.model.id && active.providerID === d.model.providerID
@@ -252,6 +274,12 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
   accumulateTotals(d.sessionID, allTokens(d.tokens), d.cost ?? 0, firstStep, ctx)
 
   const span = ctx.tracing.stepSpans.get(d.assistantMessageID)
+  const pending = ctx.tracing.pendingProvisionals.get(d.assistantMessageID)
+  if (pending && pending !== span) {
+    ctx.tracing.pendingProvisionals.delete(d.assistantMessageID)
+    pending.setStatus({ code: SpanStatusCode.ERROR, message: ctx.captureContent ? error : redactErrorMessage(error) })
+    pending.end(e.created)
+  }
   if (span) {
     const output = outputText(d.assistantMessageID, ctx)
     span.setAttributes({

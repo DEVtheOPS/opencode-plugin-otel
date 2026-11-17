@@ -171,6 +171,7 @@ export type TracingState = {
   pendingPermissions: Map<string, PendingPermission>
   activeLlm: Map<string, LlmRequestContext>
   provisionalLlm: Map<string, Span>
+  pendingProvisionals: Map<string, Span>
   modelContexts: Map<string, ModelContextSnapshot>
 }
 
