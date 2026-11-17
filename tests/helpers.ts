@@ -246,6 +246,7 @@ export function makeCtx(
     disabledMetrics: new Set(disabledMetrics),
     disabledTraces: new Set(disabledTraces),
     combineReasoningTokens,
+    captureContent: !!process.env["OPENCODE_CAPTURE_CONTENT"],
     tracer: tracer as unknown as Tracer,
     tracePrefix: "opencode.",
     rootContext: () => ROOT_CONTEXT,

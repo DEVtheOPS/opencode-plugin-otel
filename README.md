@@ -143,7 +143,7 @@ The environment variables (set them in your shell profile — `~/.zshrc`, `~/.ba
 | `OPENCODE_METRIC_PREFIX` | `opencode.` | Prefix for all metric names (e.g. set to `claude_code.` for Claude Code dashboard compatibility) |
 | `OPENCODE_DISABLE_METRICS` | *(unset)* | Comma-separated list of metric name suffixes to disable (e.g. `cache.count,session.duration`) |
 | `OPENCODE_DISABLE_LOGS` | *(unset)* | Set to any non-empty value to suppress all OTLP log events while leaving metrics and traces unchanged |
-| `OPENCODE_CAPTURE_PROMPT_IN_LOGS` | *(unset)* | Set to any non-empty value to include the full prompt text in the `prompt` attribute of `user_prompt` log events. **Log events only** — trace spans carry an observed prompt in `input.value` regardless of this flag (disable span-level capture separately via `OPENCODE_DISABLE_TRACES`). **Off by default — prompts may contain secrets or PII; enable only for trusted collectors.** |
+| `OPENCODE_CAPTURE_PROMPT_IN_LOGS` | *(unset)* | Set to any non-empty value to include the full prompt text in the `prompt` attribute of `user_prompt` log events. **Log events only** — span-level content capture is controlled separately by `OPENCODE_CAPTURE_CONTENT`. **Off by default — prompts may contain secrets or PII; enable only for trusted collectors.** |
 | `OPENCODE_CAPTURE_MODEL_CONTEXT` | *(unset)* | Set to any non-empty value to attach a bounded text-only preview of the primary model-visible context to LLM spans. Off by default; can include system instructions, earlier messages, and tool text. |
 | `OPENCODE_COMBINE_REASONING_TOKENS` | *(unset)* | Set to any non-empty value to report reasoning tokens as part of `output` instead of a separate `reasoning` type. OpenCode V2 excludes reasoning from `output`, while Claude Code includes it, so enable this for Claude Code dashboard and cost parity. Applies to the `token.usage` metric, `api_request` `output_tokens` (with `reasoning_tokens` omitted), and the LLM span `llm.token_count.completion`; `llm.token_count.completion_details.reasoning` still carries the reasoning subset. |
 | `OPENCODE_DISABLE_TRACES` | *(unset)* | Comma-separated list of trace types to disable (`session`, `llm`, `tool`). Use `all`, `*`, `true`, or `1` to disable every trace type |
@@ -155,8 +155,9 @@ The environment variables (set them in your shell profile — `~/.zshrc`, `~/.ba
 | `OPENCODE_TRACEPARENT` | *(unset)* | W3C [`traceparent`](https://www.w3.org/TR/trace-context/#traceparent-header) string. When set, all spans are parented under this remote context so opencode traces nest inside a caller's trace (e.g. a CI job). Invalid values are logged and ignored. Note: with the default `ParentBased` sampler, a value with the sampled flag off (`...-00`) suppresses all trace export. |
 | `OPENCODE_TRACESTATE` | *(unset)* | W3C [`tracestate`](https://www.w3.org/TR/trace-context/#tracestate-header) string, parsed alongside `OPENCODE_TRACEPARENT` and attached to the remote parent context. Ignored unless a valid `OPENCODE_TRACEPARENT` is also set. |
 | `OPENCODE_TRACE_PROPAGATION_PROVIDERS` | *(unset)* | Comma-separated opencode provider IDs that receive W3C `traceparent` and `tracestate` headers on LLM requests. Use `*` to explicitly enable every provider. |
+| `OPENCODE_CAPTURE_CONTENT` | *(unset)* | Set to any non-empty value to include user prompts, model outputs, and tool parameters/inputs/outputs in span attributes (`input.value`, `output.value`, `llm.input_messages`, `llm.output_messages`, `tool.parameters`). **Off by default — span attributes omit all conversation content; enable only for trusted collectors.** |
 
-Prompt logging remains disabled by default. Enable it only when the configured telemetry destination is trusted to receive potentially sensitive prompt contents.
+Prompt logging and span content capture remain disabled by default. Enable them only when the configured telemetry destination is trusted to receive potentially sensitive conversation contents.
 
 ### Plugin options (opencode.json)
 
@@ -188,6 +189,7 @@ Option keys mirror the resolved config and map to the environment variables:
 | `enabled` | `OPENCODE_ENABLE_TELEMETRY` |
 | `logsEnabled` | `OPENCODE_DISABLE_LOGS` (inverted) |
 | `capturePromptInLogs` | `OPENCODE_CAPTURE_PROMPT_IN_LOGS` |
+| `captureContent` | `OPENCODE_CAPTURE_CONTENT` |
 | `captureModelContext` | `OPENCODE_CAPTURE_MODEL_CONTEXT` |
 | `combineReasoningTokens` | `OPENCODE_COMBINE_REASONING_TOKENS` |
 | `logLevel` | *(none — option only)*: `debug`, `info`, `warn`, `error` |

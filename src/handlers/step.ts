@@ -32,6 +32,7 @@ import {
   genAiProviderName,
   isMetricEnabled,
   isTraceEnabled,
+  redactErrorMessage,
   markSeen,
   resolveRunContext,
   setBoundedMap,
@@ -90,7 +91,8 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
   }
 
   if (!isTraceEnabled("llm", ctx)) return
-  const promptText = ctx.tracing.activePrompts.get(d.sessionID)?.text
+  const rawPrompt = ctx.tracing.activePrompts.get(d.sessionID)?.text
+  const promptText = rawPrompt !== undefined ? rawPrompt.slice(0, 64_000) : undefined
   const attributes = {
     [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.LLM,
     [SESSION_ID]: d.sessionID,
@@ -100,7 +102,7 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
     [LLM_PROVIDER]: d.model.providerID,
     "gen_ai.provider.name": genAiProviderName(d.model.providerID),
     [LLM_MODEL_NAME]: d.model.id,
-    ...(promptText
+    ...(promptText && ctx.captureContent
       ? {
           [INPUT_VALUE]: promptText,
           [INPUT_MIME_TYPE]: MimeType.TEXT,
@@ -195,7 +197,7 @@ export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerCo
       [LLM_COST_TOTAL]: d.cost,
       cost_usd: d.cost,
       duration_ms: durationMs,
-      ...(output ? {
+      ...(output && ctx.captureContent ? {
         [OUTPUT_VALUE]: output,
         [OUTPUT_MIME_TYPE]: MimeType.TEXT,
         [LLM_OUTPUT_MESSAGES]: JSON.stringify([{ role: "assistant", content: output }]),
@@ -264,9 +266,9 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
         [LLM_TOKEN_COUNT_TOTAL]: allTokens(d.tokens),
       } : {}),
       ...(d.cost !== undefined ? { [LLM_COST_TOTAL]: d.cost, cost_usd: d.cost } : {}),
-      ...(output ? { [OUTPUT_VALUE]: output, [OUTPUT_MIME_TYPE]: MimeType.TEXT } : {}),
+      ...(output && ctx.captureContent ? { [OUTPUT_VALUE]: output, [OUTPUT_MIME_TYPE]: MimeType.TEXT } : {}),
     })
-    span.setStatus({ code: SpanStatusCode.ERROR, message: error })
+    span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.captureContent ? error : redactErrorMessage(error) })
     span.end(e.created)
   }
   cleanupStep(d.assistantMessageID, d.sessionID, ctx)
@@ -284,7 +286,7 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
       provider: providerID,
       "gen_ai.provider.name": genAiProviderName(providerID),
       ...agentAttrs(agent, agentType),
-      error,
+      error: ctx.captureContent ? error : redactErrorMessage(error),
       duration_ms: durationMs,
       ...ctx.commonAttrs,
     },

@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test"
+﻿import { describe, test, expect } from "bun:test"
 import { SpanStatusCode } from "@opentelemetry/api"
 import { handleToolCalled, handleToolFailed, handleToolInputStarted, handleToolSuccess } from "../../src/handlers/tool.ts"
 import { handleExecutionStarted, handleSessionCreated } from "../../src/handlers/session.ts"
@@ -40,19 +40,50 @@ describe("handleToolInputStarted", () => {
   })
 })
 
+describe("handleToolCalled oversized inputs", () => {
+  test("keeps tool.parameters parseable with the original keys when clamped", () => {
+    process.env.OPENCODE_CAPTURE_CONTENT = "true"
+    try {
+      const { ctx, tracer } = makeCtx()
+      seed(ctx)
+      handleToolInputStarted(inputStarted("call_1", "bash"), ctx)
+      const input = {
+        command: "x".repeat(200_000),
+        files: Array.from({ length: 500 }, (_, i) => `file-${i}.txt`),
+      }
+      handleToolCalled(called("call_1", input, local), ctx)
+      const span = tracer.spans.find((s) => s.name === "opencode.tool.bash")!
+      const text = span.attributes["tool.parameters"] as string
+      expect(text.length).toBeLessThanOrEqual(64_000)
+      const parsed = JSON.parse(text) as Record<string, unknown>
+      expect(Object.keys(parsed)).toContain("command")
+      expect(Object.keys(parsed)).toContain("files")
+      expect(typeof parsed["command"]).toBe("string")
+      expect(Array.isArray(parsed["files"])).toBe(true)
+    } finally {
+      delete process.env.OPENCODE_CAPTURE_CONTENT
+    }
+  })
+})
+
 describe("handleToolCalled", () => {
   test("attaches parameters and detects a local git commit", () => {
-    const { ctx, counters, logger, tracer } = makeCtx()
-    seed(ctx)
-    handleToolInputStarted(inputStarted("call_1", "shell"), ctx)
-    handleToolCalled(called("call_1", { command: "git commit -m 'x'" }, local), ctx)
-    expect(counters.commit.calls).toHaveLength(0)
-    handleToolSuccess(succeeded("call_1", "commit made", local), ctx)
-    expect(counters.commit.calls).toHaveLength(1)
-    expect(logger.records.some((record) => record.body === "commit")).toBe(true)
-    const span = tracer.spans.find((s) => s.name === "opencode.tool.shell")!
-    expect(span.attributes["input.value"]).toContain("git commit")
-    expect(span.attributes["tool.provider_executed"]).toBe(false)
+    process.env.OPENCODE_CAPTURE_CONTENT = "true"
+    try {
+      const { ctx, counters, logger, tracer } = makeCtx()
+      seed(ctx)
+      handleToolInputStarted(inputStarted("call_1", "shell"), ctx)
+      handleToolCalled(called("call_1", { command: "git commit -m 'x'" }, local), ctx)
+      expect(counters.commit.calls).toHaveLength(0)
+      handleToolSuccess(succeeded("call_1", "commit made", local), ctx)
+      expect(counters.commit.calls).toHaveLength(1)
+      expect(logger.records.some((record) => record.body === "commit")).toBe(true)
+      const span = tracer.spans.find((s) => s.name === "opencode.tool.shell")!
+      expect(span.attributes["input.value"]).toContain("git commit")
+      expect(span.attributes["tool.provider_executed"]).toBe(false)
+    } finally {
+      delete process.env.OPENCODE_CAPTURE_CONTENT
+    }
   })
 
   test("ignores non-commit shell commands", () => {
@@ -76,22 +107,27 @@ describe("handleToolCalled", () => {
 
 describe("handleToolSuccess", () => {
   test("records a locally executed tool", () => {
-    const { ctx, histograms, logger, tracer } = makeCtx()
-    seed(ctx)
-    handleToolInputStarted(inputStarted("call_1", "read", "ses_1", 1000), ctx)
-    handleToolCalled(called("call_1", {}, local, 1000), ctx)
-    handleToolSuccess(succeeded("call_1", "file body", local, 1250), ctx)
-    expect(histograms.tool.calls).toHaveLength(1)
-    expect(histograms.tool.calls[0]!.value).toBe(250)
-    expect(histograms.tool.calls[0]!.attrs["success"]).toBe(true)
-    const record = logger.records.at(-1)!
-    expect(record.body).toBe("tool_result")
-    expect(record.attributes?.["duration_ms"]).toBe(250)
-    const span = tracer.spans.find((s) => s.name === "opencode.tool.read")!
-    expect(span.startTime).toBe(1000)
-    expect(span.endTime).toBe(1250)
-    expect(span.status.code).toBe(SpanStatusCode.OK)
-    expect(span.attributes["output.value"]).toBe("file body")
+    process.env.OPENCODE_CAPTURE_CONTENT = "true"
+    try {
+      const { ctx, histograms, logger, tracer } = makeCtx()
+      seed(ctx)
+      handleToolInputStarted(inputStarted("call_1", "read", "ses_1", 1000), ctx)
+      handleToolCalled(called("call_1", {}, local, 1000), ctx)
+      handleToolSuccess(succeeded("call_1", "file body", local, 1250), ctx)
+      expect(histograms.tool.calls).toHaveLength(1)
+      expect(histograms.tool.calls[0]!.value).toBe(250)
+      expect(histograms.tool.calls[0]!.attrs["success"]).toBe(true)
+      const record = logger.records.at(-1)!
+      expect(record.body).toBe("tool_result")
+      expect(record.attributes?.["duration_ms"]).toBe(250)
+      const span = tracer.spans.find((s) => s.name === "opencode.tool.read")!
+      expect(span.startTime).toBe(1000)
+      expect(span.endTime).toBe(1250)
+      expect(span.status.code).toBe(SpanStatusCode.OK)
+      expect(span.attributes["output.value"]).toBe("file body")
+    } finally {
+      delete process.env.OPENCODE_CAPTURE_CONTENT
+    }
   })
 
   test("records a provider-executed tool", () => {
@@ -130,7 +166,7 @@ describe("handleToolFailed", () => {
     expect(histograms.tool.calls[0]!.value).toBe(200)
     expect(histograms.tool.calls[0]!.attrs["success"]).toBe(false)
     expect(logger.records.at(-1)!.attributes?.["duration_ms"]).toBe(200)
-    expect(logger.records.at(-1)!.attributes?.["error"]).toBe("tool.execution: nope")
+    expect(logger.records.at(-1)!.attributes?.["error"]).toBe("tool.execution: [redacted]")
     const span = tracer.spans.find((s) => s.name === "opencode.tool.bash")!
     expect(span.ended).toBe(true)
     expect(span.status.code).toBe(SpanStatusCode.ERROR)
@@ -155,7 +191,7 @@ describe("handleToolFailed", () => {
     handleToolFailed(failed("call_1", { type: "permission.rejected", message: "denied" }, local, 1500), ctx)
     expect(histograms.tool.calls[0]!.value).toBe(500)
     expect(histograms.tool.calls[0]!.attrs["success"]).toBe(false)
-    expect(tracer.spans.find((s) => s.name === "opencode.tool.shell")!.attributes["tool.error"]).toBe("permission.rejected: denied")
+    expect(tracer.spans.find((s) => s.name === "opencode.tool.shell")!.attributes["tool.error"]).toBe("permission.rejected: [redacted]")
   })
 
   test("does not record malformed input that was never called", () => {

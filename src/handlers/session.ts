@@ -18,6 +18,7 @@ import {
   isTraceEnabled,
   markSeen,
   modelRef,
+  redactErrorMessage,
   resolveSubagentTraceContext,
   setBoundedMap,
   totalTokens,
@@ -191,7 +192,7 @@ export function handleExecutionStarted(e: EventOf<"session.execution.started">, 
   const parentCtx = isSubagent && totals?.parentID
     ? resolveSubagentTraceContext(sessionID, totals.parentID, totals.agent, ctx)
     : ctx.rootContext()
-  const promptText = pendingPrompt?.text ?? ""
+  const promptText = (pendingPrompt?.text ?? "").slice(0, 64_000)
 
   const span = ctx.tracer.startSpan(
     `${ctx.tracePrefix}session`,
@@ -203,7 +204,7 @@ export function handleExecutionStarted(e: EventOf<"session.execution.started">, 
         [AGENT_NAME]: totals?.agent ?? "unknown",
         "agent.type": totals?.agentType ?? "primary",
         "session.is_subagent": isSubagent,
-        ...(promptText
+        ...(promptText && ctx.captureContent
           ? {
               [INPUT_VALUE]: promptText,
               [INPUT_MIME_TYPE]: MimeType.TEXT,
@@ -258,8 +259,8 @@ export function handleExecutionEnded(
     }
     if (outcome.type === "failed") {
       const message = errorSummary(outcome.error)
-      span.setStatus({ code: SpanStatusCode.ERROR, message })
-      span.setAttribute("error", message)
+      span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.captureContent ? message : redactErrorMessage(message) })
+      span.setAttribute("error", ctx.captureContent ? message : redactErrorMessage(message))
     } else if (outcome.type === "interrupted") {
       span.setAttribute("session.interrupted_reason", outcome.reason)
       span.setStatus({ code: SpanStatusCode.OK })
@@ -273,6 +274,7 @@ export function handleExecutionEnded(
 
   if (outcome.type === "failed") {
     const message = errorSummary(outcome.error)
+    const safeMessage = ctx.captureContent ? message : redactErrorMessage(message)
     ctx.emitLog({
       severityNumber: SeverityNumber.ERROR,
       severityText: "ERROR",
@@ -282,12 +284,12 @@ export function handleExecutionEnded(
       attributes: {
         "event.name": "session.error",
         "session.id": sessionID,
-        error: message,
+        error: safeMessage,
         ...agentAttrs(totals?.agent ?? "unknown", totals?.agentType ?? "unknown"),
         ...ctx.commonAttrs,
       },
     })
-    void ctx.log("error", "otel: session.error", { sessionID, error: message })
+    void ctx.log("error", "otel: session.error", { sessionID, error: safeMessage })
   }
 }
 
