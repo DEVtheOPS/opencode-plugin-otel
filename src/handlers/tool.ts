@@ -248,11 +248,38 @@ function contentText(content: readonly ToolContent[] | undefined): { text: strin
   return { text: full.length <= 64_000 ? full : full.slice(0, 64_000), fullLength: Buffer.byteLength(full, "utf8") }
 }
 
+const MAX_JSON_CHARS = 64_000
+const MAX_JSON_DEPTH = 12
+const JSON_LIMITS = { string: 4_096, array: 100, object: 200 } as const
+const JSON_LIMITS_TIGHT = { string: 256, array: 20, object: 50 } as const
+
+type JsonLimits = { string: number; array: number; object: number }
+
+function clampJson(value: unknown, limits: JsonLimits, depth: number): unknown {
+  if (typeof value === "string") return value.length > limits.string ? `${value.slice(0, limits.string)}…[truncated]` : value
+  if (Array.isArray(value)) {
+    const items = value.slice(0, limits.array).map((item) => clampJson(item, limits, depth + 1))
+    if (value.length > limits.array) items.push(`…[truncated ${value.length - limits.array} items]`)
+    return items
+  }
+  if (value !== null && typeof value === "object") {
+    if (depth >= MAX_JSON_DEPTH) return "…[truncated]"
+    const entries = Object.entries(value as Record<string, unknown>)
+    const clamped: Record<string, unknown> = {}
+    for (const [key, item] of entries.slice(0, limits.object)) clamped[key] = clampJson(item, limits, depth + 1)
+    if (entries.length > limits.object) clamped["…truncated_keys"] = entries.length - limits.object
+    return clamped
+  }
+  return value
+}
+
 function safeJson(value: unknown): string {
   try {
-    const text = JSON.stringify(value) ?? ""
-    if (text.length <= 64_000) return text
-    return JSON.stringify(text.slice(0, 64_000))
+    let text = JSON.stringify(value) ?? ""
+    if (text.length > MAX_JSON_CHARS) text = JSON.stringify(clampJson(value, JSON_LIMITS, 0)) ?? ""
+    if (text.length > MAX_JSON_CHARS) text = JSON.stringify(clampJson(value, JSON_LIMITS_TIGHT, 0)) ?? ""
+    if (text.length > MAX_JSON_CHARS) text = JSON.stringify({ "…truncated_input": true, preview: text.slice(0, MAX_JSON_CHARS - 200) })
+    return text
   } catch {
     return ""
   }

@@ -40,6 +40,32 @@ describe("handleToolInputStarted", () => {
   })
 })
 
+describe("handleToolCalled oversized inputs", () => {
+  test("keeps tool.parameters parseable with the original keys when clamped", () => {
+    process.env.OPENCODE_CAPTURE_CONTENT = "true"
+    try {
+      const { ctx, tracer } = makeCtx()
+      seed(ctx)
+      handleToolInputStarted(inputStarted("call_1", "bash"), ctx)
+      const input = {
+        command: "x".repeat(200_000),
+        files: Array.from({ length: 500 }, (_, i) => `file-${i}.txt`),
+      }
+      handleToolCalled(called("call_1", input, local), ctx)
+      const span = tracer.spans.find((s) => s.name === "opencode.tool.bash")!
+      const text = span.attributes["tool.parameters"] as string
+      expect(text.length).toBeLessThanOrEqual(64_000)
+      const parsed = JSON.parse(text) as Record<string, unknown>
+      expect(Object.keys(parsed)).toContain("command")
+      expect(Object.keys(parsed)).toContain("files")
+      expect(typeof parsed["command"]).toBe("string")
+      expect(Array.isArray(parsed["files"])).toBe(true)
+    } finally {
+      delete process.env.OPENCODE_CAPTURE_CONTENT
+    }
+  })
+})
+
 describe("handleToolCalled", () => {
   test("attaches parameters and detects a local git commit", () => {
     process.env.OPENCODE_CAPTURE_CONTENT = "true"
