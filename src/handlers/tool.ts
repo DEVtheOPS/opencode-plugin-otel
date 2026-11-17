@@ -233,7 +233,7 @@ function finishTool(
       ...agentAttrs(agentName, agentType),
       success,
       duration_ms: durationMs,
-      ...(success ? { tool_result_size_bytes: sizeBytes } : { error: error ?? "unknown" }),
+      ...(success ? { tool_result_size_bytes: sizeBytes } : { error: ctx.captureContent ? error ?? "unknown" : redactErrorMessage(error ?? "unknown") }),
       ...ctx.commonAttrs,
     },
   })

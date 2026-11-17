@@ -209,7 +209,7 @@ describe("handleExecutionEnded", () => {
     )
     expect(tracer.spans[0]!.status.code).toBe(SpanStatusCode.ERROR)
     expect(logger.records.at(-1)!.body).toBe("session.error")
-    expect(logger.records.at(-1)!.attributes?.["error"]).toBe("ProviderError: boom")
+    expect(logger.records.at(-1)!.attributes?.["error"]).toBe("ProviderError: [redacted]")
   })
 })
 

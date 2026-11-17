@@ -192,7 +192,7 @@ export function handleExecutionStarted(e: EventOf<"session.execution.started">, 
   const parentCtx = isSubagent && totals?.parentID
     ? resolveSubagentTraceContext(sessionID, totals.parentID, totals.agent, ctx)
     : ctx.rootContext()
-  const promptText = pendingPrompt?.text ?? ""
+  const promptText = (pendingPrompt?.text ?? "").slice(0, 64_000)
 
   const span = ctx.tracer.startSpan(
     `${ctx.tracePrefix}session`,
@@ -274,6 +274,7 @@ export function handleExecutionEnded(
 
   if (outcome.type === "failed") {
     const message = errorSummary(outcome.error)
+    const safeMessage = ctx.captureContent ? message : redactErrorMessage(message)
     ctx.emitLog({
       severityNumber: SeverityNumber.ERROR,
       severityText: "ERROR",
@@ -283,12 +284,12 @@ export function handleExecutionEnded(
       attributes: {
         "event.name": "session.error",
         "session.id": sessionID,
-        error: message,
+        error: safeMessage,
         ...agentAttrs(totals?.agent ?? "unknown", totals?.agentType ?? "unknown"),
         ...ctx.commonAttrs,
       },
     })
-    void ctx.log("error", "otel: session.error", { sessionID, error: message })
+    void ctx.log("error", "otel: session.error", { sessionID, error: safeMessage })
   }
 }
 

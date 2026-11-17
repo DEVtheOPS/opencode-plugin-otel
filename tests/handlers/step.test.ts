@@ -138,9 +138,25 @@ describe("handleStepFailed", () => {
     expect(llm.attributes["llm.token_count.total"]).toBe(15)
     expect(llm.attributes["llm.cost.total"]).toBe(0.1)
     expect(logger.records.at(-1)!.body).toBe("api_error")
-    expect(logger.records.at(-1)!.attributes?.["error"]).toBe("ProviderError: boom")
+    expect(logger.records.at(-1)!.attributes?.["error"]).toBe("ProviderError: [redacted]")
     expect(counters.message.calls).toHaveLength(1)
     expect(counters.modelUsage.calls).toHaveLength(1)
+  })
+
+  test("keeps the raw error when content capture is enabled", () => {
+    process.env.OPENCODE_CAPTURE_CONTENT = "true"
+    try {
+      const { ctx, logger } = makeCtx()
+      seedSession(ctx)
+      handleStepStarted(stepStarted(), ctx)
+      handleStepFailed(
+        evt("session.step.failed", { sessionID: "ses_1", assistantMessageID: "msg_1", error: { type: "ProviderError", message: "boom" }, cost: 0.1, tokens: tokens() }),
+        ctx,
+      )
+      expect(logger.records.at(-1)!.attributes?.["error"]).toBe("ProviderError: boom")
+    } finally {
+      delete process.env.OPENCODE_CAPTURE_CONTENT
+    }
   })
 
   test("folds reasoning into output for failed steps when combineReasoningTokens is enabled", () => {

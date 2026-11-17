@@ -140,7 +140,7 @@ describe("handleToolFailed", () => {
     expect(histograms.tool.calls[0]!.value).toBe(200)
     expect(histograms.tool.calls[0]!.attrs["success"]).toBe(false)
     expect(logger.records.at(-1)!.attributes?.["duration_ms"]).toBe(200)
-    expect(logger.records.at(-1)!.attributes?.["error"]).toBe("tool.execution: nope")
+    expect(logger.records.at(-1)!.attributes?.["error"]).toBe("tool.execution: [redacted]")
     const span = tracer.spans.find((s) => s.name === "opencode.tool.bash")!
     expect(span.ended).toBe(true)
     expect(span.status.code).toBe(SpanStatusCode.ERROR)
@@ -165,7 +165,7 @@ describe("handleToolFailed", () => {
     handleToolFailed(failed("call_1", { type: "permission.rejected", message: "denied" }, local, 1500), ctx)
     expect(histograms.tool.calls[0]!.value).toBe(500)
     expect(histograms.tool.calls[0]!.attrs["success"]).toBe(false)
-    expect(tracer.spans.find((s) => s.name === "opencode.tool.shell")!.attributes["tool.error"]).toBe("permission.rejected: denied")
+    expect(tracer.spans.find((s) => s.name === "opencode.tool.shell")!.attributes["tool.error"]).toBe("permission.rejected: [redacted]")
   })
 
   test("does not record malformed input that was never called", () => {
