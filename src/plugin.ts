@@ -15,6 +15,7 @@ import {
   handlePromptEnqueued,
   handleSessionCreated,
   handleSessionIdle,
+  handleSessionRenamed,
   handleRetryScheduled,
   handleSessionStatus,
   handleUsageUpdated,
@@ -161,6 +162,9 @@ export async function setup(ctx: OpenCodeContext): Promise<() => Promise<void>> 
     switch (event.type) {
       case "session.created":
         handleSessionCreated(event, eventCtx)
+        break
+      case "session.renamed":
+        handleSessionRenamed(event, eventCtx)
         break
       case "session.agent.selected":
         handleAgentSelected(event, eventCtx)

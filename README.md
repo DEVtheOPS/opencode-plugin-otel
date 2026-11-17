@@ -18,6 +18,7 @@ An [opencode](https://opencode.ai) plugin that exports telemetry via OpenTelemet
 - [What it instruments](#what-it-instruments)
   - [Metrics](#metrics)
   - [Log events](#log-events)
+  - [Traces](#traces)
 - [Installation](#installation)
 - [Configuration](#configuration)
   - [Plugin options (opencode.json)](#plugin-options-opencodejson)
@@ -97,6 +98,20 @@ the parent run span; a background child may outlive its already-ended dispatch t
 | `tool_decision` | Permission prompt answered (accept/reject) |
 | `commit` | Git commit detected |
 | `subtask_invoked` | Sub-agent session created (agent and parent session ID) |
+
+### Traces
+
+| Span | Description |
+|------|-------------|
+| `opencode.session` | One user turn, or a subagent session. Carries `session.id`, the prompt in `input.value`, and `session.title` once opencode has named the session |
+| `opencode.llm` | One model turn, with model, token counts and finish reason |
+| `opencode.tool.<name>` | One tool call, with its arguments in `input.value` and the result in `output.value` |
+
+opencode names a session from its first prompt, shortly after the session
+starts. The plugin picks that name up from `session.renamed` and stamps it on
+the spans that are still open, so a backend can show "Fix the flaky test"
+instead of `ses_fcc85048effeCXe1RvEetcywD4`. Sessions opencode has not named
+carry no `session.title` at all.
 
 ## Installation
 

@@ -154,6 +154,7 @@ export function makeTracingState(): TracingState {
     countedMessages: new Set(),
     sessionProjects: new Map(),
     sessionIdentity: new Map(),
+    sessionTitles: new Map(),
     stepOutputs: new Map(),
     pendingPrompts: new Map(),
     activePrompts: new Map(),

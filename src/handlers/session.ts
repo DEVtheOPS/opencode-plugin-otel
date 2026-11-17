@@ -25,6 +25,8 @@ import {
 
 const OPENINFERENCE_SPAN_KIND = SemanticConventions.OPENINFERENCE_SPAN_KIND
 
+const SESSION_TITLE = "session.title"
+
 export function handlePromptEnqueued(e: EventOf<"session.inbox.enqueued">, ctx: HandlerContext, capturePrompt: boolean) {
   const { sessionID, inboxID, item } = e.data
   if (item.type !== "user") return
@@ -106,6 +108,7 @@ export function handleSessionCreated(e: EventOf<"session.created">, ctx: Handler
   const isSubagent = !!d.parentID
   const agentType: SessionAgentType = isSubagent ? "subagent" : "primary"
   const agent = d.agent ?? "unknown"
+  if (d.title) setBoundedMap(ctx.tracing.sessionTitles, d.sessionID, d.title)
 
   setBoundedMap(ctx.tracing.sessionProjects, d.sessionID, d.projectID)
   setBoundedMap(ctx.tracing.sessionIdentity, d.sessionID, {
@@ -167,6 +170,14 @@ export function handleSessionCreated(e: EventOf<"session.created">, ctx: Handler
   void ctx.log("info", "otel: session.created", { sessionID: d.sessionID, isSubagent })
 }
 
+/** Records opencode's session title, which arrives after `session.created`, and stamps it on the open run span. */
+export function handleSessionRenamed(e: EventOf<"session.renamed">, ctx: HandlerContext) {
+  const { sessionID, title } = e.data
+  if (!title || ctx.tracing.sessionTitles.get(sessionID) === title) return
+  setBoundedMap(ctx.tracing.sessionTitles, sessionID, title)
+  ctx.tracing.runSpans.get(sessionID)?.setAttribute(SESSION_TITLE, title)
+}
+
 export function handleAgentSelected(e: EventOf<"session.agent.selected">, ctx: HandlerContext) {
   const { sessionID, agent } = e.data
   const identity = ctx.tracing.sessionIdentity.get(sessionID)
@@ -192,6 +203,7 @@ export function handleExecutionStarted(e: EventOf<"session.execution.started">, 
     ? resolveSubagentTraceContext(sessionID, totals.parentID, totals.agent, ctx)
     : ctx.rootContext()
   const promptText = pendingPrompt?.text ?? ""
+  const title = ctx.tracing.sessionTitles.get(sessionID)
 
   const span = ctx.tracer.startSpan(
     `${ctx.tracePrefix}session`,
@@ -203,6 +215,7 @@ export function handleExecutionStarted(e: EventOf<"session.execution.started">, 
         [AGENT_NAME]: totals?.agent ?? "unknown",
         "agent.type": totals?.agentType ?? "primary",
         "session.is_subagent": isSubagent,
+        ...(title ? { [SESSION_TITLE]: title } : {}),
         ...(promptText
           ? {
               [INPUT_VALUE]: promptText,
