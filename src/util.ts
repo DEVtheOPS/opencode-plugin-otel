@@ -34,7 +34,6 @@ export function errorSummary(err: StructuredError | undefined): string {
   return `${err.type}: ${err.message}`
 }
 
-/** Masks the free-text portion of an error summary, keeping only the structured type prefix. */
 export function redactErrorMessage(message: string): string {
   const sep = message.indexOf(": ")
   return sep >= 0 && sep <= 64 ? `${message.slice(0, sep)}: [redacted]` : "[redacted]"
