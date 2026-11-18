@@ -3,6 +3,7 @@ import { AGENT_NAME, INPUT_MIME_TYPE, INPUT_VALUE, LLM_INPUT_MESSAGES, LLM_MODEL
 import type { HandlerContext } from "../types.ts"
 import { injectTraceContext } from "../trace-context.ts"
 import { genAiProviderName, isTraceEnabled, resolveRunContext, setBoundedMap } from "../util.ts"
+import { ensureRunSpan } from "./session.ts"
 
 /** The `session.hook("model.request", ...)` event shape consumed by this handler. */
 export type ModelRequestEvent = {
@@ -10,6 +11,7 @@ export type ModelRequestEvent = {
   agent: string
   model: { providerID: string; id: string }
   kind: string
+  assistantMessageID?: string
   headers: Record<string, string>
 }
 
@@ -29,6 +31,9 @@ function textParts(parts: readonly unknown[]): string {
     .join("\n")
     .slice(0, 1_000)
 }
+
+const ACTIVE_LLM_SETTLE_MS = 200
+const ACTIVE_LLM_SETTLE_TICK_MS = 15
 
 /** Stores a bounded text-only preview of the primary model-visible request. */
 export function captureModelContext(event: ModelVisibleContextEvent, ctx: HandlerContext): void {
@@ -66,13 +71,81 @@ export function applyModelContext(
 
 /** Injects the active LLM span's W3C trace context into outbound model requests. */
 export async function handleModelRequest(event: ModelRequestEvent, ctx: HandlerContext): Promise<void> {
-  if (event.kind !== "primary") return
   const providerID = event.model.providerID
   const propagate = ctx.tracePropagationProviders.has(providerID) || ctx.tracePropagationProviders.has("*")
   if (!propagate && !ctx.tracing.modelContexts.has(event.sessionID)) return
-  if (!isTraceEnabled("llm", ctx)) return
   await ctx.tracing.eventQueue
+  if (event.kind !== "primary") {
+    if (propagate && isTraceEnabled("session", ctx)) {
+      const dispatch = ctx.tracing.subagentParents.get(event.sessionID)
+      if (dispatch) {
+        injectTraceContext(dispatch.spanContext, event.headers)
+      } else if (ctx.tracing.activeExecutions.has(event.sessionID)) {
+        ensureRunSpan(event.sessionID, Date.now(), ctx)
+        const runContext = ctx.tracing.runSpanContexts.get(event.sessionID)
+        if (runContext) injectTraceContext(runContext, event.headers)
+      } else {
+        const parentID = ctx.tracing.sessionIdentity.get(event.sessionID)?.parentID
+        const parentContext = parentID ? ctx.tracing.runSpanContexts.get(parentID) : undefined
+        const fallback = parentContext ?? ctx.tracing.runSpanContexts.get(event.sessionID)
+        if (fallback) injectTraceContext(fallback, event.headers)
+      }
+    }
+    return
+  }
+  if (!isTraceEnabled("llm", ctx)) return
+  ensureRunSpan(event.sessionID, Date.now(), ctx)
+  const stepID = event.assistantMessageID
+  if (stepID !== undefined) {
+    let pending = ctx.tracing.pendingProvisionals.get(stepID)
+    const adopted = ctx.tracing.stepSpanContexts.get(stepID)
+    if (!pending && !adopted) {
+      const span = ctx.tracer.startSpan(
+        `${ctx.tracePrefix}llm`,
+        {
+          startTime: Date.now(),
+          kind: SpanKind.CLIENT,
+          attributes: {
+            [SemanticConventions.OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.LLM,
+            [SESSION_ID]: event.sessionID,
+            [AGENT_NAME]: event.agent,
+            [LLM_MODEL_NAME]: event.model.id,
+            [LLM_PROVIDER]: providerID,
+            "gen_ai.provider.name": genAiProviderName(providerID),
+            ...ctx.commonAttrs,
+          },
+        },
+        resolveRunContext(event.sessionID, ctx),
+      )
+      setBoundedMap(ctx.tracing.provisionalLlm, event.sessionID, span)
+      setBoundedMap(ctx.tracing.pendingProvisionals, stepID, span)
+      setBoundedMap(ctx.tracing.activeLlm, event.sessionID, {
+        agent: event.agent,
+        modelID: event.model.id,
+        providerID,
+        spanContext: span.spanContext(),
+      })
+      pending = span
+    }
+    const spanCtx = adopted ?? pending?.spanContext()
+    const span = pending ?? ctx.tracing.activeStepSpans.get(event.sessionID)
+    if (span) applyModelContext(event.sessionID, event.agent, event.model, span, ctx, ctx.tracing.provisionalLlm.has(event.sessionID))
+    if (propagate && spanCtx) injectTraceContext(spanCtx, event.headers)
+    return
+  }
   let active = ctx.tracing.activeLlm.get(event.sessionID)
+  if (active) {
+    const deadline = Date.now() + ACTIVE_LLM_SETTLE_MS
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, ACTIVE_LLM_SETTLE_TICK_MS))
+      await ctx.tracing.eventQueue
+      const current = ctx.tracing.activeLlm.get(event.sessionID)
+      if (!current || current.spanContext.spanId !== active.spanContext.spanId) {
+        active = current
+        break
+      }
+    }
+  }
   if (!active) {
     const span = ctx.tracer.startSpan(
       `${ctx.tracePrefix}llm`,

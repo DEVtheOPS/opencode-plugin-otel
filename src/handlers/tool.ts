@@ -21,6 +21,7 @@ import {
   getSessionAgentMeta,
   isMetricEnabled,
   isTraceEnabled,
+  redactErrorMessage,
   resolveStepContext,
   setBoundedMap,
 } from "../util.ts"
@@ -79,11 +80,9 @@ export function handleToolCalled(e: EventOf<"session.tool.called">, ctx: Handler
   }
 
   const { agentName, agentType } = getSessionAgentMeta(d.sessionID, ctx)
-  const inputJson = safeJson(d.input)
+  const inputJson = ctx.captureContent ? safeJson(d.input) : ""
   ctx.tracing.toolSpans.get(d.id)?.setAttributes({
-    [TOOL_PARAMETERS]: inputJson,
-    [INPUT_VALUE]: inputJson,
-    [INPUT_MIME_TYPE]: MimeType.JSON,
+    ...(ctx.captureContent ? { [TOOL_PARAMETERS]: inputJson, [INPUT_VALUE]: inputJson, [INPUT_MIME_TYPE]: MimeType.JSON } : {}),
     [AGENT_NAME]: agentName,
     "agent.type": agentType,
     "tool.provider_executed": isProviderExecuted(d),
@@ -145,15 +144,15 @@ export function handleToolProgress(e: EventOf<"session.tool.progress">, ctx: Han
 /** Ends a successful tool call: records duration, sets output attributes, and emits `tool_result`. */
 export function handleToolSuccess(e: EventOf<"session.tool.success">, ctx: HandlerContext) {
   linkSubagent(e.data.id, e.data.metadata?.["sessionID"], ctx)
-  const output = contentText(e.data.content)
-  finishTool(e.data.id, e.data.sessionID, e.created, true, output, undefined, ctx)
+  const { text, fullLength } = contentText(e.data.content)
+  finishTool(e.data.id, e.data.sessionID, e.created, true, text, undefined, ctx, fullLength)
 }
 
 /** Ends a failed tool call: records duration, sets error attributes, and emits `tool_result`. */
 export function handleToolFailed(e: EventOf<"session.tool.failed">, ctx: HandlerContext) {
   linkSubagent(e.data.id, e.data.metadata?.["sessionID"], ctx)
-  const output = contentText(e.data.content)
-  finishTool(e.data.id, e.data.sessionID, e.created, false, output, errorSummary(e.data.error), ctx)
+  const { text, fullLength } = contentText(e.data.content)
+  finishTool(e.data.id, e.data.sessionID, e.created, false, text, errorSummary(e.data.error), ctx, fullLength)
 }
 
 function finishTool(
@@ -164,6 +163,7 @@ function finishTool(
   output: string,
   error: string | undefined,
   ctx: HandlerContext,
+  fullOutputLength = 0,
 ) {
   const meta = ctx.tracing.toolMeta.get(callID)
   ctx.tracing.toolMeta.delete(callID)
@@ -172,7 +172,7 @@ function finishTool(
   const start = observedExecution ? meta.startMs : endMs
   const durationMs = Math.max(0, endMs - start)
   const { agentName, agentType } = getSessionAgentMeta(sessionID, ctx)
-  const sizeBytes = output ? Buffer.byteLength(output, "utf8") : 0
+  const sizeBytes = fullOutputLength > 0 ? fullOutputLength : (output ? output.length : 0)
 
   if (success && observedExecution && meta.command && SHELL_TOOL_RE.test(tool) && GIT_COMMIT_RE.test(meta.command)) {
     if (isMetricEnabled("commit.count", ctx)) {
@@ -205,15 +205,15 @@ function finishTool(
   const span = ctx.tracing.toolSpans.get(callID)
   if (span) {
     span.setAttributes({ [AGENT_NAME]: agentName, "agent.type": agentType, "tool.success": success })
-    if (output) {
+    if (output && ctx.captureContent) {
       span.setAttributes({ [OUTPUT_VALUE]: output, [OUTPUT_MIME_TYPE]: MimeType.TEXT })
     }
     if (success) {
       span.setAttribute("tool.result_size_bytes", sizeBytes)
       span.setStatus({ code: SpanStatusCode.OK })
     } else {
-      span.setAttribute("tool.error", error ?? "unknown")
-      span.setStatus({ code: SpanStatusCode.ERROR, message: error ?? "unknown" })
+      span.setAttribute("tool.error", ctx.captureContent ? (error ?? "unknown") : redactErrorMessage(error ?? "unknown"))
+      span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.captureContent ? error : redactErrorMessage(error ?? "unknown") })
     }
     span.end(endMs)
   }
@@ -239,17 +239,20 @@ function finishTool(
   })
 }
 
-function contentText(content: readonly ToolContent[] | undefined): string {
-  if (!content) return ""
-  return content
-    .map((part) => (part.type === "text" ? part.text : part.name ?? part.uri))
-    .filter(Boolean)
+function contentText(content: readonly ToolContent[] | undefined): { text: string; fullLength: number } {
+  if (!content) return { text: "", fullLength: 0 }
+  const full = content
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
     .join("\n")
+  return { text: full.length <= 64_000 ? full : full.slice(0, 64_000), fullLength: Buffer.byteLength(full, "utf8") }
 }
 
 function safeJson(value: unknown): string {
   try {
-    return JSON.stringify(value) ?? ""
+    const text = JSON.stringify(value) ?? ""
+    if (text.length <= 64_000) return text
+    return JSON.stringify(text.slice(0, 64_000))
   } catch {
     return ""
   }

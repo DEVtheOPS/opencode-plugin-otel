@@ -132,6 +132,7 @@ export function acquireTracingState(): TracingState {
       pendingPermissions: new Map(),
       activeLlm: new Map(),
       provisionalLlm: new Map(),
+      pendingProvisionals: new Map(),
       modelContexts: new Map(),
     }
     g[TRACING_KEY] = state

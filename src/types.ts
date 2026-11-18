@@ -171,6 +171,7 @@ export type TracingState = {
   pendingPermissions: Map<string, PendingPermission>
   activeLlm: Map<string, LlmRequestContext>
   provisionalLlm: Map<string, Span>
+  pendingProvisionals: Map<string, Span>
   modelContexts: Map<string, ModelContextSnapshot>
 }
 
@@ -183,6 +184,7 @@ export type HandlerContext = {
   disabledMetrics: Set<string>
   disabledTraces: Set<string>
   combineReasoningTokens: boolean
+  captureContent: boolean
   tracer: Tracer
   tracePrefix: string
   rootContext: () => Context

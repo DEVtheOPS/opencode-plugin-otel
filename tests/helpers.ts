@@ -138,6 +138,7 @@ export function makeTracingState(): TracingState {
   return {
     seenEvents: new Set(),
     eventQueue: Promise.resolve(),
+    pendingProvisionals: new Map(),
     runSpans: new Map(),
     runSpanContexts: new Map(),
     stepSpans: new Map(),
@@ -246,6 +247,7 @@ export function makeCtx(
     disabledMetrics: new Set(disabledMetrics),
     disabledTraces: new Set(disabledTraces),
     combineReasoningTokens,
+    captureContent: !!process.env["OPENCODE_CAPTURE_CONTENT"],
     tracer: tracer as unknown as Tracer,
     tracePrefix: "opencode.",
     rootContext: () => ROOT_CONTEXT,

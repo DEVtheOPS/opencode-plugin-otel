@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test"
+﻿import { describe, test, expect } from "bun:test"
 import { SpanStatusCode } from "@opentelemetry/api"
 import { handleStepEnded, handleStepFailed, handleStepStarted, handleTextEnded } from "../../src/handlers/step.ts"
 import { handleExecutionStarted, handleSessionCreated } from "../../src/handlers/session.ts"
@@ -35,28 +35,50 @@ describe("handleStepStarted", () => {
 
 describe("handleStepEnded", () => {
   test("records token, cost, cache, message, and model metrics and ends the span", () => {
-    const { ctx, tracer, counters, logger } = makeCtx()
+    process.env.OPENCODE_CAPTURE_CONTENT = "true"
+    try {
+      const { ctx, tracer, counters, logger } = makeCtx()
+      seedSession(ctx)
+      handleStepStarted(stepStarted(), ctx)
+      handleTextEnded(evt("session.text.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 1, text: "world" }), ctx)
+      handleTextEnded(evt("session.text.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 0, text: "hello" }), ctx)
+      handleStepEnded(
+        evt("session.step.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", finish: "stop", cost: 0.25, tokens: tokens(10, 5, 2, 3, 0) }, 2000),
+        ctx,
+      )
+      const tokenTypes = counters.token.calls.map((c) => c.attrs["type"])
+      expect(tokenTypes).toEqual(["input", "output", "reasoning", "cacheRead", "cacheCreation"])
+      expect(counters.cost.calls[0]!.value).toBe(0.25)
+      expect(counters.cache.calls.map((c) => c.attrs["type"])).toEqual(["cacheRead"])
+      expect(counters.message.calls).toHaveLength(1)
+      expect(counters.modelUsage.calls[0]!.attrs["provider"]).toBe("anthropic")
+      expect(logger.records.at(-1)!.body).toBe("api_request")
+      const llm = tracer.spans.find((s) => s.name === "opencode.llm")!
+      expect(llm.ended).toBe(true)
+      expect(llm.status.code).toBe(SpanStatusCode.OK)
+      expect(llm.attributes["llm.token_count.total"]).toBe(20)
+      expect(llm.attributes["output.value"]).toBe("hello\nworld")
+      expect(llm.attributes["llm.output_messages"]).toBe('[{"role":"assistant","content":"hello\\nworld"}]')
+    } finally {
+      delete process.env.OPENCODE_CAPTURE_CONTENT
+    }
+  })
+
+  test("omits prompt and output content unless OPENCODE_CAPTURE_CONTENT is enabled", () => {
+    const { ctx, tracer } = makeCtx()
     seedSession(ctx)
+    ctx.tracing.activePrompts.set("ses_1", { text: "secret prompt", startMs: 1 })
     handleStepStarted(stepStarted(), ctx)
-    handleTextEnded(evt("session.text.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 1, text: "world" }), ctx)
-    handleTextEnded(evt("session.text.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 0, text: "hello" }), ctx)
+    handleTextEnded(evt("session.text.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 0, text: "secret answer" }), ctx)
     handleStepEnded(
-      evt("session.step.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", finish: "stop", cost: 0.25, tokens: tokens(10, 5, 2, 3, 0) }, 2000),
+      evt("session.step.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", finish: "stop", cost: 0, tokens: tokens(1, 1, 0, 0, 0) }, 2000),
       ctx,
     )
-    const tokenTypes = counters.token.calls.map((c) => c.attrs["type"])
-    expect(tokenTypes).toEqual(["input", "output", "reasoning", "cacheRead", "cacheCreation"])
-    expect(counters.cost.calls[0]!.value).toBe(0.25)
-    expect(counters.cache.calls.map((c) => c.attrs["type"])).toEqual(["cacheRead"])
-    expect(counters.message.calls).toHaveLength(1)
-    expect(counters.modelUsage.calls[0]!.attrs["provider"]).toBe("anthropic")
-    expect(logger.records.at(-1)!.body).toBe("api_request")
     const llm = tracer.spans.find((s) => s.name === "opencode.llm")!
-    expect(llm.ended).toBe(true)
-    expect(llm.status.code).toBe(SpanStatusCode.OK)
-    expect(llm.attributes["llm.token_count.total"]).toBe(20)
-    expect(llm.attributes["output.value"]).toBe("hello\nworld")
-    expect(llm.attributes["llm.output_messages"]).toBe('[{"role":"assistant","content":"hello\\nworld"}]')
+    expect(llm.attributes["input.value"]).toBeUndefined()
+    expect(llm.attributes["llm.input_messages"]).toBeUndefined()
+    expect(llm.attributes["output.value"]).toBeUndefined()
+    expect(llm.attributes["llm.output_messages"]).toBeUndefined()
   })
 
   test("reports reasoning separately from output by default", () => {

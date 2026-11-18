@@ -24,7 +24,7 @@ import {
   SESSION_ID,
 } from "@arizeai/openinference-semantic-conventions"
 import type { EventOf, HandlerContext, SessionTotals } from "../types.ts"
-import { ensureSession } from "./session.ts"
+import { ensureRunSpan, ensureSession } from "./session.ts"
 import { applyModelContext } from "./chat-headers.ts"
 import {
   agentAttrs,
@@ -32,6 +32,7 @@ import {
   genAiProviderName,
   isMetricEnabled,
   isTraceEnabled,
+  redactErrorMessage,
   markSeen,
   resolveRunContext,
   setBoundedMap,
@@ -90,7 +91,10 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
   }
 
   if (!isTraceEnabled("llm", ctx)) return
-  const promptText = ctx.tracing.activePrompts.get(d.sessionID)?.text
+  ensureRunSpan(d.sessionID, d.started ?? e.created, ctx)
+  const rawPrompt = ctx.tracing.activePrompts.get(d.sessionID)?.text
+    ?? (ctx.tracing.activeExecutions.has(d.sessionID) ? undefined : ctx.tracing.pendingPrompts.get(d.sessionID)?.[0]?.text)
+  const promptText = rawPrompt !== undefined ? rawPrompt.slice(0, 64_000) : undefined
   const attributes = {
     [OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.LLM,
     [SESSION_ID]: d.sessionID,
@@ -100,7 +104,7 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
     [LLM_PROVIDER]: d.model.providerID,
     "gen_ai.provider.name": genAiProviderName(d.model.providerID),
     [LLM_MODEL_NAME]: d.model.id,
-    ...(promptText
+    ...(promptText && ctx.captureContent
       ? {
           [INPUT_VALUE]: promptText,
           [INPUT_MIME_TYPE]: MimeType.TEXT,
@@ -110,6 +114,28 @@ export function handleStepStarted(e: EventOf<"session.step.started">, ctx: Handl
     ...ctx.commonAttrs,
   }
   const active = ctx.tracing.activeLlm.get(d.sessionID)
+  const exact = ctx.tracing.pendingProvisionals.get(d.assistantMessageID)
+  if (exact) {
+    ctx.tracing.pendingProvisionals.delete(d.assistantMessageID)
+    const stale = ctx.tracing.provisionalLlm.get(d.sessionID)
+    ctx.tracing.provisionalLlm.delete(d.sessionID)
+    if (stale && stale !== exact) {
+      stale.setStatus({ code: SpanStatusCode.ERROR, message: "model request did not match step" })
+      stale.end()
+    }
+    exact.setAttributes(attributes)
+    applyModelContext(d.sessionID, d.agent, d.model, exact, ctx)
+    setBoundedMap(ctx.tracing.stepSpans, d.assistantMessageID, exact)
+    setBoundedMap(ctx.tracing.activeStepSpans, d.sessionID, exact)
+    setBoundedMap(ctx.tracing.stepSpanContexts, d.assistantMessageID, exact.spanContext())
+    setBoundedMap(ctx.tracing.activeLlm, d.sessionID, {
+      agent: d.agent,
+      modelID: d.model.id,
+      providerID: d.model.providerID,
+      spanContext: exact.spanContext(),
+    })
+    return
+  }
   const provisional = ctx.tracing.provisionalLlm.get(d.sessionID)
   ctx.tracing.provisionalLlm.delete(d.sessionID)
   const matches = provisional && active?.agent === d.agent && active.modelID === d.model.id && active.providerID === d.model.providerID
@@ -195,7 +221,7 @@ export function handleStepEnded(e: EventOf<"session.step.ended">, ctx: HandlerCo
       [LLM_COST_TOTAL]: d.cost,
       cost_usd: d.cost,
       duration_ms: durationMs,
-      ...(output ? {
+      ...(output && ctx.captureContent ? {
         [OUTPUT_VALUE]: output,
         [OUTPUT_MIME_TYPE]: MimeType.TEXT,
         [LLM_OUTPUT_MESSAGES]: JSON.stringify([{ role: "assistant", content: output }]),
@@ -248,6 +274,12 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
   accumulateTotals(d.sessionID, allTokens(d.tokens), d.cost ?? 0, firstStep, ctx)
 
   const span = ctx.tracing.stepSpans.get(d.assistantMessageID)
+  const pending = ctx.tracing.pendingProvisionals.get(d.assistantMessageID)
+  if (pending && pending !== span) {
+    ctx.tracing.pendingProvisionals.delete(d.assistantMessageID)
+    pending.setStatus({ code: SpanStatusCode.ERROR, message: ctx.captureContent ? error : redactErrorMessage(error) })
+    pending.end(e.created)
+  }
   if (span) {
     const output = outputText(d.assistantMessageID, ctx)
     span.setAttributes({
@@ -264,9 +296,9 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
         [LLM_TOKEN_COUNT_TOTAL]: allTokens(d.tokens),
       } : {}),
       ...(d.cost !== undefined ? { [LLM_COST_TOTAL]: d.cost, cost_usd: d.cost } : {}),
-      ...(output ? { [OUTPUT_VALUE]: output, [OUTPUT_MIME_TYPE]: MimeType.TEXT } : {}),
+      ...(output && ctx.captureContent ? { [OUTPUT_VALUE]: output, [OUTPUT_MIME_TYPE]: MimeType.TEXT } : {}),
     })
-    span.setStatus({ code: SpanStatusCode.ERROR, message: error })
+    span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.captureContent ? error : redactErrorMessage(error) })
     span.end(e.created)
   }
   cleanupStep(d.assistantMessageID, d.sessionID, ctx)
@@ -284,7 +316,7 @@ export function handleStepFailed(e: EventOf<"session.step.failed">, ctx: Handler
       provider: providerID,
       "gen_ai.provider.name": genAiProviderName(providerID),
       ...agentAttrs(agent, agentType),
-      error,
+      error: ctx.captureContent ? error : redactErrorMessage(error),
       duration_ms: durationMs,
       ...ctx.commonAttrs,
     },
@@ -334,6 +366,13 @@ function cleanupStep(assistantMessageID: string, sessionID: string, ctx: Handler
   ctx.tracing.stepMeta.delete(assistantMessageID)
   if (spanContext && ctx.tracing.activeLlm.get(sessionID)?.spanContext.spanId === spanContext.spanId) {
     ctx.tracing.activeLlm.delete(sessionID)
+  }
+  const pending = ctx.tracing.pendingProvisionals.get(assistantMessageID)
+  if (pending) {
+    ctx.tracing.pendingProvisionals.delete(assistantMessageID)
+    if (ctx.tracing.provisionalLlm.get(sessionID) === pending) ctx.tracing.provisionalLlm.delete(sessionID)
+    pending.setStatus({ code: SpanStatusCode.OK })
+    pending.end()
   }
   ctx.tracing.stepOutputs.delete(assistantMessageID)
 }

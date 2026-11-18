@@ -34,6 +34,12 @@ export function errorSummary(err: StructuredError | undefined): string {
   return `${err.type}: ${err.message}`
 }
 
+export function redactErrorMessage(message: string): string {
+  return message
+    .replace(/\b(?:for|with|query|search(?:ing)?\s+for)\s+.+$/i, " for [redacted]")
+    .slice(0, 128)
+}
+
 /** Returns the canonical OTel GenAI provider name, preserving unknown provider IDs. */
 export function genAiProviderName(providerID: string): string {
   return GEN_AI_PROVIDER_NAMES[providerID] ?? providerID
@@ -129,7 +135,12 @@ export function resolveRunContext(sessionID: string, ctx: HandlerContext): Conte
   const span = ctx.tracing.runSpans.get(sessionID)
   if (span) return trace.setSpan(base, span)
   const spanContext = ctx.tracing.runSpanContexts.get(sessionID)
-  return spanContext ? trace.setSpanContext(base, spanContext) : base
+  if (spanContext) return trace.setSpanContext(base, spanContext)
+  const dispatch = ctx.tracing.subagentParents.get(sessionID)
+  if (dispatch) return trace.setSpanContext(base, dispatch.spanContext)
+  const parentID = ctx.tracing.sessionIdentity.get(sessionID)?.parentID
+  if (parentID && parentID !== sessionID) return resolveRunContext(parentID, ctx)
+  return base
 }
 
 /** Resolves the trace context for a step span, falling back to its run context. */
