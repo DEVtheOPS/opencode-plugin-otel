@@ -367,5 +367,12 @@ function cleanupStep(assistantMessageID: string, sessionID: string, ctx: Handler
   if (spanContext && ctx.tracing.activeLlm.get(sessionID)?.spanContext.spanId === spanContext.spanId) {
     ctx.tracing.activeLlm.delete(sessionID)
   }
+  const pending = ctx.tracing.pendingProvisionals.get(assistantMessageID)
+  if (pending) {
+    ctx.tracing.pendingProvisionals.delete(assistantMessageID)
+    if (ctx.tracing.provisionalLlm.get(sessionID) === pending) ctx.tracing.provisionalLlm.delete(sessionID)
+    pending.setStatus({ code: SpanStatusCode.OK })
+    pending.end()
+  }
   ctx.tracing.stepOutputs.delete(assistantMessageID)
 }
